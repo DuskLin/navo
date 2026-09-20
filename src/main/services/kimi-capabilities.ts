@@ -67,13 +67,14 @@ export class KimiCapabilities {
     key: string,
     force = false,
     provider: Provider = 'kimi',
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    headers?: Record<string, string>
   ): Promise<AccountCapabilities> {
     // A cancellable background refresh must not cancel a shared foreground probe.
-    if (signal) {
-      signal.throwIfAborted()
-      const result = await this.fetch(region, key, provider, signal)
-      signal.throwIfAborted()
+    if (signal || headers) {
+      signal?.throwIfAborted()
+      const result = await this.fetch(region, key, provider, signal, headers)
+      signal?.throwIfAborted()
       return structuredClone(result)
     }
     const fingerprint = createHash('sha256').update(`${provider}\0${region}\0${key}`).digest('hex')
@@ -94,7 +95,13 @@ export class KimiCapabilities {
     }
   }
 
-  private async read(url: string, key: string, signal: AbortSignal, label: string) {
+  private async read(
+    url: string,
+    key: string,
+    signal: AbortSignal,
+    label: string,
+    headers?: Record<string, string>
+  ) {
     let response: Response
     try {
       response = await this.request(url, {
@@ -102,7 +109,8 @@ export class KimiCapabilities {
           authorization: `Bearer ${key}`,
           accept: 'application/json',
           // 与参考项目 quota dashboard 一致，用量接口按此版本返回 parallel 等完整字段。
-          ...(new URL(url).pathname.endsWith('/usages') ? { 'user-agent': 'KimiCLI/1.6' } : {})
+          ...(new URL(url).pathname.endsWith('/usages') ? { 'user-agent': 'KimiCLI/1.6' } : {}),
+          ...headers
         },
         signal,
         redirect: 'error'
@@ -145,7 +153,8 @@ export class KimiCapabilities {
     region: Region,
     key: string,
     provider: Provider,
-    parentSignal?: AbortSignal
+    parentSignal?: AbortSignal,
+    headers?: Record<string, string>
   ): Promise<AccountCapabilities> {
     const base = accountBaseUrl(region, provider)
     const timeout = AbortSignal.timeout(15000)
@@ -156,7 +165,7 @@ export class KimiCapabilities {
     let next = `${base}/models`
     // 模型目录可能分页；只使用 last_id 构造同一官方地址的下一页。
     for (let page = 0; page < 20; page++) {
-      const result = await this.read(next, key, signal, '模型列表')
+      const result = await this.read(next, key, signal, '模型列表', headers)
       if (!Array.isArray(result.data.data)) throw new Error('上游模型列表格式无效')
       for (const item of result.data.data) models.push(string(object(item).id, '上游模型 ID', 200))
       const limit = reportedConcurrency(result.data, result.headers)
@@ -179,7 +188,8 @@ export class KimiCapabilities {
           : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
         key,
         signal,
-        provider === 'deepseek' ? '余额' : '额度与并发信息'
+        provider === 'deepseek' ? '余额' : '额度与并发信息',
+        headers
       )
       const limit = reportedConcurrency(usage.data, usage.headers)
       if (limit !== null) concurrency.push(limit)

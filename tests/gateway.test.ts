@@ -1865,13 +1865,13 @@ test('请求体大小、方法校验和上游重定向限制', async () => {
   }
 })
 
-test('仅接受 API Key，旧 OAuth 配置先备份再停用，不能转发旧令牌', async () => {
+test('OAuth 必须本地导入，旧 OAuth 配置先备份再停用，不能转发旧令牌', async () => {
   const f = await storeFixture()
   try {
     await f.store.saveAccount(accountInput('existing-key'))
     await assert.rejects(
       f.store.saveAccount({ ...accountInput('unsupported'), kind: 'oauth' }),
-      /仅支持 API Key/
+      /导入本地/
     )
     const legacy = {
       ...account('legacy'),

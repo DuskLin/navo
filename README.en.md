@@ -49,7 +49,7 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 
 | Provider    | Account type                           | Synced information                                            |
 | ----------- | -------------------------------------- | ------------------------------------------------------------- |
-| Kimi Code   | China / international API key          | Models, 5-hour / 7-day quotas, concurrency limit              |
+| Kimi Code   | China / international API key or local OAuth | Models, 5-hour / 7-day quotas, concurrency limit              |
 | DeepSeek    | Platform API key, pay as you go        | Models and balances per currency, without currency conversion |
 | OpenCode Go | API key with an active Go subscription | Models and 5-hour / weekly / monthly quota windows            |
 
@@ -307,3 +307,9 @@ Linux requires FUSE 2, executable permission on the AppImage and an unlocked Sec
 ## License
 
 [MIT](LICENSE)
+
+### Import a local Kimi login
+
+Sign in to Kimi Code, then open Settings → Account management → Add account and select “Kimi Code · 本地登录态” in the provider dropdown. Choose the account region and import. Re-importing updates the same account while preserving its name, groups, enabled state and manual models.
+
+Navo reads `credentials/kimi-code.json` and `device_id` from `~/.kimi` or `~/.kimi-code`, or only from `KIMI_SHARE_DIR` when set. Legacy macOS `kimi-code` Keychain credentials are supported. Credentials are encrypted and refreshed automatically; they are never returned to the UI. Shared refresh tokens may be rotated by either app. If authentication expires, sign in again and re-import. Navo does not modify Kimi Code files.

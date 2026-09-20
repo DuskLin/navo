@@ -1,3 +1,4 @@
+import { KimiAuth, kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
@@ -122,6 +123,7 @@ export class Gateway {
   }
   private activeRequests = new Set<Promise<void>>()
   private transitions: Promise<unknown> = Promise.resolve()
+  readonly kimi: KimiAuth
   readonly codex: CodexAuth
   private error = ''
   private requests: RequestRecord[] = []
@@ -140,6 +142,7 @@ export class Gateway {
       () => (this.store.get().settings.flowIdleMinutes ?? 5) * 60000
     )
     this.pricing = new ModelPriceCatalog(store.priceCachePath, catalogRequest)
+    this.kimi = new KimiAuth(store, metadataRequest)
     this.codex = new CodexAuth(store, metadataRequest)
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
@@ -304,6 +307,12 @@ export class Gateway {
       return this.snapshot()
     })
   }
+  async importKimiAccount(region: unknown): Promise<GatewaySnapshot> {
+    if (region !== 'mainland-cn' && region !== 'global') throw new Error('账号区域无效')
+    const id = await this.kimi.importLocal(region)
+    this.scheduler.reset(id)
+    return this.snapshot()
+  }
   async importCodexAccount(): Promise<GatewaySnapshot> {
     const id = await this.codex.importLocal()
     this.scheduler.reset(id)
@@ -315,6 +324,12 @@ export class Gateway {
     if (input.id && !old) throw new Error('账号不存在')
     if (old && old.provider !== input.provider && !input.secret)
       throw new Error('切换供应商请填写新的 API Key')
+    if (input.provider === 'kimi' && input.kind === 'oauth') {
+      if (!old || old.kind !== 'oauth' || old.provider !== 'kimi' || old.region !== input.region)
+        throw new Error('请先导入对应区域的本地 Kimi 登录态')
+      await this.store.saveAccount(input, old.capabilities ?? undefined)
+      return this.snapshot()
+    }
     if (input.provider === 'codex') {
       if (!old || old.provider !== 'codex') throw new Error('请先导入本地 Codex 认证')
       await this.store.saveAccount(input, old.capabilities ?? undefined)
@@ -350,6 +365,10 @@ export class Gateway {
       if (!old || old.provider !== 'codex') throw new Error('请先导入本地 Codex 认证')
       return this.codex.models(await this.codex.credential(old.id))
     }
+    if (provider === 'kimi' && old?.kind === 'oauth' && !input.secret) {
+      if (old.region !== input.region) throw new Error('请重新导入对应区域的 Kimi 登录态')
+      return this.kimi.models(old.region, await this.kimi.credential(old.id))
+    }
     const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
     return this.capabilities.get(input.region as Region, key, false, provider)
@@ -379,16 +398,25 @@ export class Gateway {
       throw new Error('切换供应商请填写新的 API Key')
     if (provider === 'codex' && (!old || old.provider !== 'codex'))
       throw new Error('请先导入本地 Codex 认证')
+    if (
+      provider === 'kimi' &&
+      old?.kind === 'oauth' &&
+      !input.secret &&
+      old.region !== input.region
+    )
+      throw new Error('请重新导入对应区域的 Kimi 登录态')
     if (provider === 'codex' && protocol !== 'responses')
       throw new Error('Codex 仅支持 Responses 测试')
     const credential =
       provider === 'codex'
         ? await this.codex.credential(old!.id)
-        : {
-            accessToken: input.secret
-              ? string(input.secret, 'API Key', 16384)
-              : (old?.credential.accessToken ?? '')
-          }
+        : provider === 'kimi' && old?.kind === 'oauth' && !input.secret
+          ? await this.kimi.credential(old.id)
+          : {
+              accessToken: input.secret
+                ? string(input.secret, 'API Key', 16384)
+                : (old?.credential.accessToken ?? '')
+            }
     if (!credential.accessToken || /[\s\x00-\x1f\x7f]/.test(credential.accessToken))
       throw new Error('请填写有效的 API Key')
     const started = Date.now()
@@ -422,17 +450,23 @@ export class Gateway {
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
     const credential =
-      old.provider === 'codex' ? await this.codex.credential(old.id) : old.credential
+      old.provider === 'codex'
+        ? await this.codex.credential(old.id)
+        : old.provider === 'kimi' && old.kind === 'oauth'
+          ? await this.kimi.credential(old.id)
+          : old.credential
     const capabilities =
       old.provider === 'codex'
         ? await this.codex.models(credential, signal)
-        : await this.capabilities.get(
-            old.region,
-            old.credential.accessToken,
-            true,
-            old.provider,
-            signal
-          )
+        : old.provider === 'kimi' && old.kind === 'oauth'
+          ? await this.kimi.models(old.region, credential, signal)
+          : await this.capabilities.get(
+              old.region,
+              old.credential.accessToken,
+              true,
+              old.provider,
+              signal
+            )
     signal?.throwIfAborted()
     await this.store.mutate((data) => {
       signal?.throwIfAborted()
@@ -736,7 +770,9 @@ export class Gateway {
           const credential =
             account.provider === 'codex'
               ? await this.codex.credential(account.id)
-              : account.credential
+              : account.provider === 'kimi' && account.kind === 'oauth'
+                ? await this.kimi.credential(account.id)
+                : account.credential
           const token = credential.accessToken
           if (controller.signal.aborted) break
           if (
@@ -789,6 +825,9 @@ export class Gateway {
             headers.delete('anthropic-beta')
             headers.set('session_id', goSession)
           }
+          if (account.provider === 'kimi')
+            for (const [name, value] of Object.entries(kimiHeaders(credential)))
+              headers.set(name, value)
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           upstreamRoute = targetRoute
           const upstream = await this.request(

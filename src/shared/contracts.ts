@@ -52,6 +52,7 @@ export interface HelperApi {
     query: import('./quota-cost').QuotaCycleQuery
   ): Promise<import('./quota-cost').QuotaCostCycle[]>
   setQuotaCycleExcluded(input: import('./quota-cost').QuotaCycleExclusion): Promise<GatewaySnapshot>
+  importKimiAccount(region: Region): Promise<GatewaySnapshot>
   importCodexAccount(): Promise<GatewaySnapshot>
   saveAccount(input: AccountInput): Promise<GatewaySnapshot>
   inspectAccount(input: AccountProbe): Promise<AccountCapabilities>
@@ -311,6 +312,7 @@ export const IPC = {
   quotaCycles: 'gateway:quota-cycles',
   quotaCycleExclude: 'gateway:quota-cycle-exclude',
   usageStats: 'gateway:usage-stats',
+  accountImportKimi: 'account:import-kimi',
   accountImportCodex: 'account:import-codex',
   accountSave: 'account:save',
   accountInspect: 'account:inspect',

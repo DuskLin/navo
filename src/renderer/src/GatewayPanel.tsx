@@ -817,6 +817,8 @@ export function GatewayPanel({
     AccountInput & { capabilities?: AccountCapabilities | null }
   >()
   const [rotatingKey, setRotatingKey] = useState(false)
+  const [kimiImport, setKimiImport] = useState(false)
+  const [kimiImportRegion, setKimiImportRegion] = useState<AccountInput['region']>('mainland-cn')
   const [confirmCodexImport, setConfirmCodexImport] = useState(false)
   const [deleting, setDeleting] = useState<{
     type: 'account'
@@ -1717,6 +1719,44 @@ export function GatewayPanel({
           </div>
         </div>
       )}
+      {kimiImport && (
+        <Modal
+          title="导入本地 Kimi 登录态"
+          close={() => {
+            if (!busy) setKimiImport(false)
+          }}
+        >
+          <p>
+            读取本机 Kimi Code
+            登录凭据，加密保存到网关，并同步模型和额度。同一账号重复导入会更新认证。
+          </p>
+          <Field label="登录账号区域">
+            <select
+              disabled={busy}
+              value={kimiImportRegion}
+              onChange={(e) => setKimiImportRegion(e.target.value as AccountInput['region'])}
+            >
+              <option value="mainland-cn">中国区 · kimi.com</option>
+              <option value="global">国际区 · kimi.ai</option>
+            </select>
+          </Field>
+          <p className="muted">
+            请先在 Kimi Code 中登录。与 Kimi Code
+            共用登录态时，令牌刷新可能相互影响；若登录失效，请重新登录后导入。
+          </p>
+          {error && <p role="alert">{error}</p>}
+          <button
+            className="button primary"
+            disabled={busy}
+            onClick={async () => {
+              if (await action(() => api.importKimiAccount(kimiImportRegion), 'Kimi 登录态已导入'))
+                setKimiImport(false)
+            }}
+          >
+            {busy ? '正在导入…' : '导入登录态'}
+          </button>
+        </Modal>
+      )}
       {confirmCodexImport && (
         <Modal
           title="导入 Codex 认证风险提醒"
@@ -1769,6 +1809,12 @@ export function GatewayPanel({
       {accountEdit && (
         <AccountEditor
           input={accountEdit}
+          importKimi={(region) => {
+            setAccountEdit(undefined)
+            setError('')
+            setKimiImportRegion(region)
+            setKimiImport(true)
+          }}
           close={() => setAccountEdit(undefined)}
           saved={(data) => {
             setSnapshot(data)
@@ -1933,10 +1979,12 @@ function ModelTestCell({ draft, model }: { draft: AccountInput; model: string })
 
 function AccountEditor({
   input,
+  importKimi,
   close,
   saved
 }: {
   input: AccountInput & { capabilities?: AccountCapabilities | null }
+  importKimi: (region: AccountInput['region']) => void
   close: () => void
   saved: (data: GatewaySnapshot) => void
 }) {
@@ -2051,12 +2099,22 @@ function AccountEditor({
           </Field>
           <Field label="供应商">
             <select
-              disabled={input.provider === 'codex'}
-              value={draft.provider ?? 'kimi'}
-              onChange={(e) => change('provider', e.target.value as AccountInput['provider'])}
+              disabled={input.kind === 'oauth'}
+              value={
+                draft.provider === 'kimi' && draft.kind === 'oauth'
+                  ? 'kimi-local'
+                  : (draft.provider ?? 'kimi')
+              }
+              onChange={(e) => {
+                if (e.target.value === 'kimi-local') importKimi(draft.region)
+                else change('provider', e.target.value as AccountInput['provider'])
+              }}
             >
               {input.provider === 'codex' && <option value="codex">Codex · 本地认证</option>}
-              <option value="kimi">Kimi Code</option>
+              <option value="kimi">Kimi Code · API Key</option>
+              {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
+                <option value="kimi-local">Kimi Code · 本地登录态</option>
+              )}
               <option value="deepseek">DeepSeek · 按量付费</option>
               <option value="opencode-go">OpenCode Go · 订阅</option>
             </select>
@@ -2064,6 +2122,7 @@ function AccountEditor({
           {(draft.provider ?? 'kimi') === 'kimi' && (
             <Field label="账号区域">
               <select
+                disabled={input.kind === 'oauth'}
                 value={draft.region}
                 onChange={(e) => change('region', e.target.value as AccountInput['region'])}
               >
@@ -2072,7 +2131,7 @@ function AccountEditor({
               </select>
             </Field>
           )}
-          {draft.provider !== 'codex' && (
+          {draft.kind !== 'oauth' && (
             <Field
               label="API Key"
               hint={
@@ -2097,6 +2156,11 @@ function AccountEditor({
                 }}
               />
             </Field>
+          )}
+          {draft.provider === 'kimi' && draft.kind === 'oauth' && (
+            <p className="muted">
+              认证来自本地 Kimi Code；更新登录态请在「添加账号」中选择「Kimi Code · 本地登录态」。
+            </p>
           )}
           {draft.provider === 'codex' && (
             <p className="muted">

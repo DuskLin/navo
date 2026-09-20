@@ -19,6 +19,9 @@ import {
 
 export interface Credential {
   accessToken: string
+  localTokenHash?: string
+  kimiOAuth?: true
+  deviceId?: string
   refreshToken?: string
   accountId?: string
   userId?: string
@@ -96,9 +99,12 @@ export function validateGroup(value: unknown): GroupInput {
 export function validateAccount(value: unknown, groups: StoredGroup[]): AccountInput {
   const v = object(value)
   const provider = validateProvider(v.provider)
-  if (v.kind !== (provider === 'codex' ? 'oauth' : 'api-key'))
+  if (
+    v.kind !== (provider === 'codex' ? 'oauth' : 'api-key') &&
+    !(provider === 'kimi' && v.kind === 'oauth')
+  )
     throw new Error(provider === 'codex' ? 'Codex 仅支持本地 OAuth 认证' : '仅支持 API Key 接入')
-  if (provider === 'codex' && v.secret) throw new Error('请使用导入本地 Codex 认证更新凭据')
+  if (v.kind === 'oauth' && v.secret) throw new Error('请使用导入本地认证更新凭据')
   if (!['mainland-cn', 'global'].includes(v.region as string)) throw new Error('账号区域无效')
   if (
     !Array.isArray(v.memberships) ||
@@ -124,7 +130,7 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
   return {
     ...(v.id !== undefined ? { id: string(v.id, '账号 ID') } : {}),
     name: string(v.name, '账号名称'),
-    kind: provider === 'codex' ? 'oauth' : 'api-key',
+    kind: v.kind as AccountInput['kind'],
     provider,
     ...(v.modelProtocols !== undefined
       ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
@@ -300,7 +306,7 @@ export class GatewayStore {
       })
       // 旧授权账号仅保留名称和分组，不把访问令牌当作 API Key。先保留加密备份，
       // 再迁移为停用且待填写密钥的账号；已有 API Key 账号可直接读取。
-      if (data.accounts.some((a) => object(a).kind === 'oauth' && object(a).provider !== 'codex')) {
+      if (data.accounts.some((a) => legacyOAuth(object(a)))) {
         try {
           await writeFile(`${this.file}.oauth-backup`, raw, { mode: 0o600, flag: 'wx' })
         } catch (error) {
@@ -309,7 +315,7 @@ export class GatewayStore {
       }
       const accounts = data.accounts.map((a) => {
         const item = object(a)
-        const legacy = item.kind === 'oauth' && item.provider !== 'codex'
+        const legacy = legacyOAuth(item)
         const { secret: _secret, ...input } = validateAccount(
           legacy ? { ...item, kind: 'api-key', enabled: false } : item,
           groups
@@ -327,9 +333,18 @@ export class GatewayStore {
           ),
           id: string(item.id, '账号 ID'),
           credential: {
-            ...(input.provider === 'codex'
+            ...(input.kind === 'oauth'
               ? {
-                  accountId: string(c.accountId, 'Codex 账号 ID', 512),
+                  accountId: string(c.accountId, '账号 ID', 512),
+                  ...(input.provider === 'kimi'
+                    ? {
+                        kimiOAuth: true as const,
+                        deviceId: string(c.deviceId, 'Kimi 设备标识', 512),
+                        ...(c.localTokenHash
+                          ? { localTokenHash: string(c.localTokenHash, '本地认证标识', 64) }
+                          : {})
+                      }
+                    : {}),
                   ...(c.userId ? { userId: string(c.userId, 'Codex 用户 ID', 16384) } : {}),
                   ...(c.refreshToken
                     ? { refreshToken: string(c.refreshToken, '刷新令牌', 16384) }
@@ -425,6 +440,16 @@ export class GatewayStore {
       if (input.id && !old) throw new Error('账号不存在')
       if (old && old.provider !== input.provider && !secret)
         throw new Error('切换供应商请填写新的 API Key')
+      if (
+        input.kind === 'oauth' &&
+        (!old ||
+          old.kind !== 'oauth' ||
+          old.provider !== input.provider ||
+          old.region !== input.region)
+      )
+        throw new Error('请先导入对应区域的本地登录态')
+      if (old?.kind === 'oauth' && input.kind !== 'oauth' && !secret)
+        throw new Error('切换认证方式请填写新的 API Key')
       const nextCredential = secret ? { accessToken: secret } : old?.credential
       if (!nextCredential?.accessToken) throw new Error('请填写 API Key')
       if (expectedKey && nextCredential.accessToken !== expectedKey)
@@ -559,4 +584,17 @@ export function validateQuotaCardOrder(value: unknown): string[] {
   const ids = value.map((id) => string(id, '账号 ID'))
   if (new Set(ids).size !== ids.length) throw new Error('卡片顺序不能包含重复账号')
   return ids
+}
+
+function legacyOAuth(item: Record<string, unknown>): boolean {
+  return (
+    item.kind === 'oauth' &&
+    item.provider !== 'codex' &&
+    !(
+      item.provider === 'kimi' &&
+      item.credential &&
+      typeof item.credential === 'object' &&
+      (item.credential as Credential).kimiOAuth === true
+    )
+  )
 }

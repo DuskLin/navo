@@ -6,6 +6,17 @@ import { _electron as electron } from 'playwright'
 import { createServer } from 'node:http'
 
 const userData = await mkdtemp(join(tmpdir(), 'navo-smoke-'))
+const kimiHome = join(userData, 'kimi')
+await mkdir(join(kimiHome, 'credentials'), { recursive: true })
+await writeFile(join(kimiHome, 'device_id'), 'smoke-kimi-device')
+await writeFile(
+  join(kimiHome, 'credentials/kimi-code.json'),
+  JSON.stringify({
+    access_token: 'smoke-kimi-oauth',
+    refresh_token: 'smoke-kimi-refresh',
+    expires_at: Date.now() / 1000 + 3600
+  })
+)
 const codexHome = join(userData, 'codex')
 await mkdir(codexHome)
 const codexToken =
@@ -122,8 +133,20 @@ const upstream = createServer((req, res) => {
     )
     return
   }
+  if (req.url === '/coding/v1/me') {
+    assert.equal(req.headers.authorization, 'Bearer smoke-kimi-oauth')
+    assert.equal(req.headers['x-msh-device-id'], 'smoke-kimi-device')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ user_id: 'smoke-kimi-user' }))
+    return
+  }
   if (req.url === '/coding/v1/usages') {
-    assert.equal(req.headers['user-agent'], 'KimiCLI/1.6')
+    assert.equal(
+      req.headers['user-agent'],
+      req.headers.authorization === 'Bearer smoke-kimi-oauth'
+        ? 'kimi-code-cli/0.42.0'
+        : 'KimiCLI/1.6'
+    )
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(
       JSON.stringify({
@@ -202,7 +225,12 @@ const gatewayPort = reservation.address().port
 await new Promise((resolve) => reservation.close(resolve))
 
 async function launch() {
-  const env = { ...process.env, NAVO_TEST_USER_DATA: userData, CODEX_HOME: codexHome }
+  const env = {
+    ...process.env,
+    NAVO_TEST_USER_DATA: userData,
+    CODEX_HOME: codexHome,
+    KIMI_SHARE_DIR: kimiHome
+  }
   delete env.ELECTRON_RUN_AS_NODE
   application = await electron.launch({ args: [testEntry], env })
   const page = await application.firstWindow()
@@ -393,6 +421,41 @@ try {
     refreshedCodex.accounts.find((a) => a.id === importedCodex.id).models.includes('gpt-6-astra')
   )
   await page.evaluate((id) => window.navo.deleteAccount(id), importedCodex.id)
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
+  await page.getByRole('button', { name: '添加账号', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: '添加账号' })
+    .getByLabel('供应商', { exact: true })
+    .selectOption('kimi-local')
+  const kimiImportDialog = page.getByRole('dialog', { name: '导入本地 Kimi 登录态' })
+  assert.equal(
+    await kimiImportDialog.getByLabel('登录账号区域', { exact: true }).inputValue(),
+    'mainland-cn'
+  )
+  await kimiImportDialog.getByRole('button', { name: '导入登录态', exact: true }).click()
+  await kimiImportDialog.waitFor({ state: 'hidden' })
+  const kimiSnapshot = await page.evaluate(() => window.navo.getGateway())
+  const importedKimi = kimiSnapshot.accounts[0]
+  assert.equal(importedKimi.kind, 'oauth')
+  assert.equal(importedKimi.provider, 'kimi')
+  assert.ok(!JSON.stringify(kimiSnapshot).includes('smoke-kimi-oauth'))
+  const repeatedKimi = await page.evaluate(() => window.navo.importKimiAccount('mainland-cn'))
+  assert.equal(repeatedKimi.accounts.length, 1)
+  assert.equal(repeatedKimi.accounts[0].id, importedKimi.id)
+  await page
+    .getByRole('row')
+    .filter({ hasText: importedKimi.name })
+    .getByRole('button', { name: '编辑', exact: true })
+    .click()
+  const kimiEditor = page.getByRole('dialog', { name: '编辑账号' })
+  assert.equal(await kimiEditor.getByLabel('API Key', { exact: true }).count(), 0)
+  assert.equal(await kimiEditor.getByLabel('账号区域', { exact: true }).isDisabled(), true)
+  await page.screenshot({ path: join(artifacts, 'kimi-local-import.png') })
+  await kimiEditor.getByRole('button', { name: '保存账号', exact: true }).click()
+  await kimiEditor.waitFor({ state: 'hidden' })
+  await page.evaluate((id) => window.navo.deleteAccount(id), importedKimi.id)
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()

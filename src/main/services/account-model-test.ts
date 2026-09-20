@@ -1,3 +1,4 @@
+import { kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
 import { pipeline } from 'node:stream/promises'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
@@ -70,6 +71,8 @@ export async function testAccountModel(
     for (const [key, value] of Object.entries(codexHeaders(credential))) headers.set(key, value)
     headers.set('session_id', randomUUID())
   }
+  if (input.provider === 'kimi')
+    for (const [key, value] of Object.entries(kimiHeaders(credential))) headers.set(key, value)
   const redact = (message: string): string =>
     message.split(credential.accessToken).join('[已隐藏]').slice(0, 1000)
   try {
