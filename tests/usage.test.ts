@@ -155,14 +155,14 @@ test('用量按完整历史汇总、筛选和时间分桶，重启保留，未�
       firstTokenMs: null
     })
     const result = history.usage(query)
-    assert.equal(result.summary.requests, 25)
+    assert.equal(result.summary.requests, 24)
     assert.equal(result.summary.reported, 24)
     assert.equal(result.summary.totalTokens, 2640)
     assert.equal(result.summary.cacheHitRate, 0.8)
     assert.equal(result.summary.cost, null)
     assert.equal(result.summary.cacheWrite, null)
     assert.equal(result.points.length, 24)
-    assert.equal(result.points[0].requests, 2)
+    assert.equal(result.points[0].requests, 1)
     assert.equal(
       history.usage({ ...query, accountId: 'a', model: 'k3', protocol: 'responses' }).summary
         .requests,
@@ -220,12 +220,12 @@ test('平均速度按有效流式时长加权，中断数量和已报告消耗�
     const result = history.usage({ start, end: start + 86400000, bucketMs: 3600000 })
     assert.equal(result.summary.averageTokensPerSecond, 30)
     assert.equal(result.summary.speedSamples, 2)
-    assert.equal(result.summary.interruptedRequests, 2)
+    assert.equal(result.summary.interruptedRequests, 1)
     assert.equal(result.summary.interruptedReported, 1)
     assert.equal(result.summary.interruptedTokens, 150)
     assert.equal(result.summary.interruptedCost, 0.01)
     assert.equal(result.byModel[0].averageTokensPerSecond, 30)
-    assert.equal(result.points[0].interruptedRequests, 2)
+    assert.equal(result.points[0].interruptedRequests, 1)
     history.append({
       ...base,
       id: 'other-account',
@@ -243,7 +243,7 @@ test('平均速度按有效流式时长加权，中断数量和已报告消耗�
         averageTokensPerSecond: 30,
         speedSamples: 2,
         averageFirstTokenMs: 500,
-        firstTokenSamples: 4
+        firstTokenSamples: 3
       }
     )
     assert.deepEqual(
@@ -293,7 +293,7 @@ test('平均速度按有效流式时长加权，中断数量和已报告消耗�
         averageTokensPerSecond: 30,
         speedSamples: 2,
         averageFirstTokenMs: 500,
-        firstTokenSamples: 4
+        firstTokenSamples: 3
       },
       {
         accountId: 'account-b',
@@ -326,7 +326,8 @@ test('按账号和模型平均首 token，保留零值并排除未知、失败�
     status: 200,
     attempts: 1,
     durationMs: 3000,
-    firstTokenMs: 100
+    firstTokenMs: 100,
+    usage: { input: 1, output: null, cacheRead: null, cacheWrite: null, cost: null }
   }
   try {
     history.append({ ...base, id: 'zero', firstTokenMs: 0 })
@@ -496,14 +497,14 @@ test('热力图默认最近十二个月并支持完整历史，日期边界与�
     history.append({ ...record, id: 'after', time: time + 1000 })
     const result = history.usage({ ...range, bucketMs: 86400000 })
     assert.equal(result.points.length, dates.length)
-    assert.equal(result.points.at(-2)!.requests, 1)
-    assert.equal(result.points.at(-1)!.requests, 1)
+    assert.equal(result.points.at(-2)!.requests, 0)
+    assert.equal(result.points.at(-1)!.requests, 0)
     assert.equal(result.points.at(-1)!.totalTokens, null)
     history.append({ ...record, id: 'older', time: new Date(2023, 0, 15).getTime() })
     const full = history.usage({ ...range, bucketMs: 86400000, allHistory: true })
     assert.equal(localDayKey(full.points[0].time), '2025-02-01')
     assert.equal(full.points.length, dates.length)
-    assert.equal(full.summary.requests, 2)
+    assert.equal(full.summary.requests, 0)
     assert.equal(
       full.points.find((point) => localDayKey(point.time) === '2023-01-15')?.requests,
       undefined
@@ -670,4 +671,61 @@ test('cost display omits zero currencies while retaining nonzero mixed amounts a
     formatUsageCost({ cost: null, costAmounts: [{ currency: 'USD', value: 0.0000001 }] }),
     'USD <0.000001'
   )
+})
+
+test('unknown token records are excluded before all aggregations while zero and partial usage remain', async (t) => {
+  const start = new Date(2026, 8, 16).getTime()
+  t.mock.method(Date, 'now', () => start + 12 * 3600000)
+  const dir = await mkdtemp(join(tmpdir(), 'navo-unknown-usage-'))
+  const history = new RequestHistory(join(dir, 'history.sqlite'))
+  const empty = { input: null, output: null, cacheRead: null, cacheWrite: null, cost: null }
+  const base = {
+    time: start + 1000,
+    accountId: 'a',
+    account: 'A',
+    group: '',
+    model: 'known',
+    status: 200,
+    attempts: 1,
+    durationMs: 100,
+    firstTokenMs: 20,
+    sessionId: 'session'
+  }
+  const query = { start, end: start + 86400000, bucketMs: 86400000, allHistory: true }
+  try {
+    history.append({ ...base, id: 'zero', usage: { ...empty, input: 0 } })
+    history.append({
+      ...base,
+      id: 'partial',
+      status: 499,
+      usage: { ...empty, output: 10, cost: 1 }
+    })
+    const expected = history.usage(query)
+    assert.equal(expected.summary.requests, 2)
+    assert.equal(expected.summary.totalTokens, 10)
+    assert.equal(expected.summary.interruptedRequests, 1)
+    for (const [index, usage] of [undefined, empty, { ...empty, cost: 99 }].entries()) {
+      history.append({
+        ...base,
+        id: `unknown-${index}`,
+        model: index === 0 ? 'known' : 'unknown',
+        accountId: 'unknown-account',
+        account: 'Unknown',
+        status: 499,
+        time: start + 3600000,
+        durationMs: 3600000,
+        usage
+      })
+    }
+    history.append({ ...base, id: 'old-unknown', time: start - 30 * 86400000 })
+    assert.deepEqual(history.usage(query), expected)
+    assert.equal(history.page().total, 6)
+    assert.equal(history.usage({ ...query, model: 'unknown' }).byModel.length, 0)
+    const hourly = history.usage({ ...query, bucketMs: 3600000, allHistory: false })
+    assert.equal(hourly.summary.requests, 2)
+    assert.equal(hourly.points[1].requests, 0)
+  } finally {
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
 })

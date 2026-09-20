@@ -250,9 +250,13 @@ export class RequestHistory {
       (query.end - query.start) / query.bucketMs > 366
     )
       throw new Error('统计时间范围无效')
+    const tokensKnown =
+      "(json_extract(record, '$.usage.input') IS NOT NULL OR json_extract(record, '$.usage.output') IS NOT NULL OR json_extract(record, '$.usage.cacheRead') IS NOT NULL OR json_extract(record, '$.usage.cacheWrite') IS NOT NULL)"
     if (query.allHistory && query.bucketMs === 86400000) {
       const earliest = this.db
-        .prepare("SELECT MIN(json_extract(record, '$.time')) AS time FROM requests")
+        .prepare(
+          `SELECT MIN(json_extract(record, '$.time')) AS time FROM requests WHERE ${tokensKnown}`
+        )
         .get()!
       if (earliest.time != null && Number(earliest.time) < query.start) {
         const start = new Date(Number(earliest.time))
@@ -267,7 +271,8 @@ export class RequestHistory {
     if (query.protocol && !['responses', 'chat-completions', 'messages'].includes(query.protocol))
       throw new Error('统计来源无效')
     const values: (number | string)[] = [query.start, query.end]
-    let where = "WHERE json_extract(record, '$.time') >= ? AND json_extract(record, '$.time') < ?"
+    // Unknown token usage must not contribute to any dashboard statistics. Zero is known.
+    let where = `WHERE ${tokensKnown} AND json_extract(record, '$.time') >= ? AND json_extract(record, '$.time') < ?`
     for (const [field, value] of [
       ['accountId', query.accountId],
       ['model', query.model],
@@ -285,8 +290,6 @@ export class RequestHistory {
       "json_extract(record, '$.status') >= 200 AND json_extract(record, '$.status') < 300 AND json_extract(record, '$.interruption') IS NULL AND json_extract(record, '$.streamDurationMs') > 0 AND json_extract(record, '$.usage.output') IS NOT NULL"
     const tokenSum =
       "COALESCE(json_extract(record, '$.usage.input'), 0) + COALESCE(json_extract(record, '$.usage.output'), 0) + COALESCE(json_extract(record, '$.usage.cacheRead'), 0) + COALESCE(json_extract(record, '$.usage.cacheWrite'), 0)"
-    const tokensKnown =
-      "(json_extract(record, '$.usage.input') IS NOT NULL OR json_extract(record, '$.usage.output') IS NOT NULL OR json_extract(record, '$.usage.cacheRead') IS NOT NULL OR json_extract(record, '$.usage.cacheWrite') IS NOT NULL)"
     const clientInterrupted =
       "(json_extract(record, '$.interruption') = 'client_disconnect' OR (json_type(record, '$.interruption') IS NULL AND json_extract(record, '$.status') = 499))"
     const interrupted = `(${clientInterrupted} OR json_extract(record, '$.interruption') IN ('timeout', 'upstream_disconnect', 'upstream_error', 'gateway_shutdown'))`
@@ -402,12 +405,12 @@ export class RequestHistory {
     }
     const accounts = this.db
       .prepare(
-        "SELECT COALESCE(json_extract(record, '$.accountId'), json_extract(record, '$.account')) AS id, MAX(json_extract(record, '$.account')) AS name FROM requests WHERE json_extract(record, '$.account') != '' GROUP BY id ORDER BY name"
+        `SELECT COALESCE(json_extract(record, '$.accountId'), json_extract(record, '$.account')) AS id, MAX(json_extract(record, '$.account')) AS name FROM requests WHERE ${tokensKnown} AND json_extract(record, '$.account') != '' GROUP BY id ORDER BY name`
       )
       .all() as { id: string; name: string }[]
     const models = this.db
       .prepare(
-        "SELECT DISTINCT json_extract(record, '$.model') AS model FROM requests WHERE json_extract(record, '$.model') != '' ORDER BY model"
+        `SELECT DISTINCT json_extract(record, '$.model') AS model FROM requests WHERE ${tokensKnown} AND json_extract(record, '$.model') != '' ORDER BY model`
       )
       .all()
       .map((row) => String(row.model))

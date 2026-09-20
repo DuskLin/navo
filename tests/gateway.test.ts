@@ -1283,7 +1283,7 @@ test('Kimi Code session IDs persist across protocols and contribute to chat dura
     req.on('end', () => {
       received.push(JSON.parse(body))
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ ok: true }))
+      res.end(JSON.stringify({ ok: true, usage: { input_tokens: 1, output_tokens: 1 } }))
     })
   })
   try {
