@@ -304,19 +304,19 @@ export function UsageDashboard({
                   <Zap size={13} />
                   真实消耗 Tokens
                 </small>
-                <strong title={exact(s?.totalTokens)}>
-                  {loading ? '…' : exact(s?.totalTokens)}
+                <strong title={exact(s?.totalTokens ?? 0)}>
+                  {loading ? '…' : exact(s?.totalTokens ?? 0)}
                 </strong>
               </div>
             </div>
             <div className="usage-metrics">
               {metrics.map(({ label, key, icon: Icon }) => (
-                <div key={key} title={exact(s?.[key])}>
+                <div key={key} title={exact(s?.[key] ?? 0)}>
                   <small>
                     <Icon size={13} />
                     {label}
                   </small>
-                  <strong>{compact(s?.[key])}</strong>
+                  <strong>{compact(s?.[key] ?? 0)}</strong>
                 </div>
               ))}
               <div className="cache-hit-metric">
@@ -365,8 +365,12 @@ export function UsageDashboard({
                         : `命中率 ${(s.cacheHitRate * 100).toFixed(1)}%`}
                     </span>
                   </div>
-                  <strong title={`缓存命中 ${exact(s?.cacheRead)} tokens`}>
-                    {compact(s?.cacheRead)}
+                  <strong
+                    title={
+                      s?.cacheRead == null ? '缓存命中 -' : `缓存命中 ${exact(s.cacheRead)} tokens`
+                    }
+                  >
+                    {s?.cacheRead == null ? '-' : compact(s.cacheRead)}
                   </strong>
                 </div>
               </div>
