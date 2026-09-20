@@ -141,6 +141,24 @@ html[data-theme='dark'] {
   align-items: center;
   gap: 16px;
 }
+.topbar-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.dashboard-overview .topbar-title {
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+.dashboard-overview .topbar-sync {
+  margin: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
 .preview-tag {
   display: flex;
   gap: 5px;
@@ -178,13 +196,6 @@ main {
   justify-content: space-between;
   margin-bottom: 30px;
   gap: 12px;
-}
-.eyebrow {
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--muted);
-  margin-bottom: 9px;
-  font-weight: 600;
 }
 h1 {
   font-size: 30px;
@@ -1013,9 +1024,6 @@ h2 {
   main {
     padding: 18px 20px calc(86px + env(safe-area-inset-bottom));
   }
-  .eyebrow {
-    display: none;
-  }
   h1 {
     font-size: 28px;
   }
@@ -1376,7 +1384,6 @@ h2 {
   }
   .brand-description,
   .preview-tag,
-  .eyebrow,
   .auto-refresh {
     display: none;
   }
@@ -1477,24 +1484,12 @@ h2 {
     padding-top: 22px;
   }
 }
-/* The overview prioritizes quota over navigation chrome and secondary metrics. */
-.quota-overview .topbar {
+/* Overview pages share compact navigation and heading styles. */
+.dashboard-overview .topbar {
   height: 64px;
 }
-.quota-overview main {
+.dashboard-overview main {
   padding-top: 24px;
-}
-.quota-overview .eyebrow {
-  display: none;
-}
-.quota-overview .heading {
-  margin-bottom: 14px;
-}
-.quota-overview h1 {
-  font-size: 25px;
-}
-.quota-overview .sync-status {
-  margin-top: 6px;
 }
 .quota-overview .summary {
   padding: 12px 0;
@@ -1620,26 +1615,19 @@ h2 {
   padding: 18px;
 }
 @media (max-width: 699px) {
-  .quota-overview .topbar {
+  .dashboard-overview .topbar {
     height: 54px;
     padding: 0 16px;
   }
-  .quota-overview .brand {
+  .dashboard-overview .brand {
     font-size: 21px;
   }
-  .quota-overview .brand img {
+  .dashboard-overview .brand img {
     width: 27px;
     height: 27px;
   }
-  .quota-overview main {
+  .dashboard-overview main {
     padding: 10px 14px calc(78px + env(safe-area-inset-bottom));
-  }
-  .quota-overview .heading {
-    margin-bottom: 12px;
-    padding: 0 2px;
-  }
-  .quota-overview h1 {
-    font-size: 23px;
   }
   .quota-overview .summary {
     padding: 10px 0;
@@ -1764,4 +1752,47 @@ html[data-theme='dark'] .provider-logo.minimax {
 html[data-theme='dark'] .provider-logo.codex img,
 html[data-theme='dark'] .provider-logo.minimax img {
   filter: invert(1);
+}
+
+/* Keep the overview header on one line as space becomes limited. */
+@media (max-width: 1100px) {
+  .dashboard-overview .topbar {
+    gap: 12px;
+  }
+  .dashboard-overview .top-actions {
+    gap: 8px;
+  }
+  .dashboard-overview .preview-tag {
+    display: none;
+  }
+  .dashboard-overview .desktop-nav {
+    gap: 4px;
+  }
+  .dashboard-overview .desktop-nav a {
+    padding: 0 12px;
+  }
+}
+@media (max-width: 900px) {
+  .dashboard-overview .topbar-sync > span:last-child {
+    display: none;
+  }
+}
+@media (max-width: 699px) {
+  .dashboard-overview .topbar-identity {
+    gap: 10px;
+  }
+  .dashboard-overview .topbar-title {
+    padding-left: 10px;
+    font-size: 16px;
+  }
+  .dashboard-overview .top-actions {
+    gap: 4px;
+  }
+  .dashboard-overview .top-actions .icon-button {
+    width: 32px;
+    height: 32px;
+  }
+  .dashboard-overview .topbar-sync {
+    margin-right: 2px;
+  }
 }

@@ -324,18 +324,40 @@ function App({
     </>
   )
   return (
-    <div className={`dashboard ${page === 'quota' && !account ? 'quota-overview' : ''}`}>
+    <div
+      className={`dashboard ${!account ? 'dashboard-overview' : ''} ${page === 'quota' && !account ? 'quota-overview' : ''}`}
+    >
       <header className="topbar">
-        <a href="#quota" className="brand">
-          <img src={logo} alt="" />
-          <span>
-            Navo<span className="brand-description">额度仪表盘</span>
-          </span>
-        </a>
+        <div className="topbar-identity">
+          <a href="#quota" className="brand">
+            <img src={logo} alt="" />
+            <span>Navo{account && <span className="brand-description">额度仪表盘</span>}</span>
+          </a>
+          {!account && (
+            <h1 className="topbar-title">
+              {{ quota: '额度概览', usage: '用量分析', status: '连接状态' }[page]}
+            </h1>
+          )}
+        </div>
         <nav className="desktop-nav" aria-label="主导航">
           {navigation}
         </nav>
         <div className="top-actions">
+          {!account && (
+            <>
+              <div
+                className={`sync-status topbar-sync ${stale ? 'stale' : ''}`}
+                role="status"
+                title={`更新于 ${time(updated)} · 每 30 秒自动刷新`}
+              >
+                <span className="status-dot" />
+                <span>
+                  {stale ? '连接中断 · 数据可能已过期' : snapshot ? '实时连接' : '示例数据'}
+                </span>
+              </div>
+              {refresh}
+            </>
+          )}
           <span className="preview-tag">
             <FlaskConical size={13} />
             {snapshot ? '只读访问' : '交互预览'}
@@ -350,34 +372,29 @@ function App({
         </div>
       </header>
       <main>
-        <div className="heading">
-          <div>
-            {account ? (
+        {account && (
+          <div className="heading">
+            <div>
               <div className="detail-heading">
                 <a href="#quota" className="icon-button" aria-label="返回额度概览">
                   <ArrowLeft size={22} />
                 </a>
                 <h1>账号详情</h1>
               </div>
-            ) : (
-              <>
-                <div className="eyebrow">YOUR USAGE, AT A GLANCE</div>
-                <h1>{{ quota: '额度概览', usage: '用量分析', status: '连接状态' }[page]}</h1>
-              </>
-            )}
-            <div className={`sync-status ${stale ? 'stale' : ''}`} role="status">
-              <span className="status-dot" />
-              <span>
-                {stale ? '连接中断 · 数据可能已过期' : snapshot ? '实时连接' : '示例数据'}
-              </span>
-              <span className="sync-time">更新于 {time(updated)}</span>
+              <div className={`sync-status ${stale ? 'stale' : ''}`} role="status">
+                <span className="status-dot" />
+                <span>
+                  {stale ? '连接中断 · 数据可能已过期' : snapshot ? '实时连接' : '示例数据'}
+                </span>
+                <span className="sync-time">更新于 {time(updated)}</span>
+              </div>
+            </div>
+            <div className="heading-actions">
+              <span className="auto-refresh">每 30 秒刷新</span>
+              {refresh}
             </div>
           </div>
-          <div className="heading-actions">
-            <span className="auto-refresh">每 30 秒刷新</span>
-            {refresh}
-          </div>
-        </div>
+        )}
         {account ? (
           <>
             <div className="detail-identity">
