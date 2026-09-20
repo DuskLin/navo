@@ -26,6 +26,7 @@ try {
   app = await electron.launch({ args: [entry], env })
   const desktop = await app.firstWindow()
   await desktop.getByRole('button', { name: '设置', exact: true }).waitFor()
+  await desktop.getByRole('button', { name: '先体验一下', exact: true }).click()
   await desktop.evaluate(async () => {
     const state = await window.navo.getGateway()
     await window.navo.saveAccount({
@@ -64,9 +65,10 @@ try {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto(state.localUrl)
-  await page.getByRole('heading', { name: '登录额度仪表盘' }).waitFor()
-  await page.getByLabel('访问码', { exact: true }).fill(code)
-  await page.getByRole('button', { name: '登录', exact: true }).click()
+  // A shared URL logs in automatically and removes its credential from history.
+  await page.getByRole('link', { name: '查看实时验证账号详情' }).waitFor()
+  assert.equal(new URL(page.url()).hash, '')
+  assert.equal(await page.getByLabel('访问码', { exact: true }).count(), 0)
   await page.getByRole('link', { name: '查看实时验证账号详情' }).waitFor()
   assert.match(await page.locator('.account-card').innerText(), /81/)
   assert.equal(await page.getByText('Kimi 账号 A', { exact: true }).count(), 0)
@@ -92,7 +94,7 @@ try {
   await desktop.getByText('仪表盘已关闭', { exact: true }).waitFor()
   assert.equal((await desktop.evaluate(() => window.navo.getDashboard())).running, false)
   await assert.rejects(() =>
-    context.request.get(`${state.localUrl}/api/snapshot`, { timeout: 3000 })
+    context.request.get(new URL('/api/snapshot', state.localUrl).href, { timeout: 3000 })
   )
   await desktop.getByRole('switch', { name: '启用只读仪表盘', exact: true }).click()
   await desktop.getByText('仪表盘已启动', { exact: true }).waitFor()
@@ -103,7 +105,10 @@ try {
     await desktop.getByLabel('HTTPS 端口', { exact: true }).inputValue(),
     String(port + 1)
   )
-  assert.equal((await context.request.get(`${state.localUrl}/api/snapshot`)).status(), 401)
+  assert.equal(
+    (await context.request.get(new URL('/api/snapshot', state.localUrl).href)).status(),
+    401
+  )
   await page.reload()
   await page.getByLabel('访问码', { exact: true }).fill(code)
   await page.getByRole('button', { name: '登录', exact: true }).click()
@@ -111,12 +116,29 @@ try {
   await desktop.getByRole('button', { name: '重置修改', exact: true }).click()
   await desktop.screenshot({ path: 'artifacts/mobile/desktop-sharing.png' })
   for (const url of state.lanUrls) {
-    const result = await context.request.get(`${url}/api/snapshot`)
+    const result = await context.request.get(new URL('/api/snapshot', url).href)
     assert.equal(result.status(), 401)
+  }
+  for (const url of state.lanUrls) {
+    const lanContext = await browser.newContext({ ignoreHTTPSErrors: true })
+    try {
+      const lanPage = await lanContext.newPage()
+      await lanPage.goto(url)
+      await lanPage.getByRole('link', { name: '查看实时验证账号详情' }).waitFor()
+      assert.equal(new URL(lanPage.url()).hash, '')
+    } finally {
+      await lanContext.close()
+    }
   }
   await desktop.evaluate(() => window.navo.rotateDashboardCode())
   await page.getByRole('button', { name: '刷新额度' }).click()
   await page.getByRole('heading', { name: '登录额度仪表盘' }).waitFor()
+  await page.goto(state.localUrl)
+  await page.getByText('访问码不正确或已过期。', { exact: true }).waitFor()
+  assert.equal(new URL(page.url()).hash, '')
+  const rotated = await desktop.evaluate(() => window.navo.getDashboard())
+  await page.goto(rotated.localUrl)
+  await page.getByRole('link', { name: '查看实时验证账号详情' }).waitFor()
   assert.deepEqual(errors, [])
   if (process.env.TEST_PUBLIC_TUNNEL === '1') {
     await desktop.evaluate(
@@ -143,7 +165,7 @@ try {
     assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), live.publicUrl)
     await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), originalClipboard)
     if (process.env.TEST_EXTERNAL_PROBE === '1') {
-      console.log(`External probe URL: ${live.publicUrl}`)
+      console.log(`External probe URL: ${new URL(live.publicUrl).origin}`)
       await new Promise((resolve) => setTimeout(resolve, 55000))
       console.log('External probe window finished; shutting down test tunnel.')
     } else {
@@ -152,7 +174,7 @@ try {
         publicStatus = await app.evaluate(async ({ net }, url) => {
           try {
             return (
-              await net.fetch(url + '/api/snapshot', {
+              await net.fetch(new URL('/api/snapshot', url).href, {
                 credentials: 'omit',
                 cache: 'no-store',
                 signal: AbortSignal.timeout(10000)
@@ -172,15 +194,15 @@ try {
       await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), originalClipboard)
       const authenticated = await app.evaluate(
         async ({ net }, { url, code }) => {
-          const login = await net.fetch(url + '/api/login', {
+          const login = await net.fetch(new URL('/api/login', url).href, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json', Origin: url },
+            headers: { 'Content-Type': 'application/json', Origin: new URL(url).origin },
             body: JSON.stringify({ code }),
             signal: AbortSignal.timeout(15000)
           })
           if (login.status !== 200) return { status: login.status, data: null }
-          const response = await net.fetch(url + '/api/snapshot', {
+          const response = await net.fetch(new URL('/api/snapshot', url).href, {
             credentials: 'include',
             signal: AbortSignal.timeout(15000)
           })
@@ -196,8 +218,23 @@ try {
       )
     }
   }
+  if (process.env.TEST_PUBLIC_TUNNEL !== '1') {
+    // Render the public-sharing UI without depending on a live Cloudflare tunnel.
+    await app.evaluate(({ ipcMain }, state) => {
+      ipcMain.removeHandler('dashboard:get')
+      ipcMain.handle('dashboard:get', () => ({
+        ...state,
+        publicUrl: 'https://dashboard.example.com/#code=smoke-test-only',
+        tunnel: 'connected'
+      }))
+    }, rotated)
+    await desktop.getByText('扫码直接访问', { exact: true }).waitFor()
+    assert.equal(await desktop.locator('.dashboard-qr svg').count(), 1)
+    assert.equal(await desktop.locator('.dashboard-qr svg path').count(), 2)
+    await desktop.screenshot({ path: 'artifacts/mobile/desktop-sharing-qr.png', fullPage: true })
+  }
   console.log(
-    'Passed: Electron integration, live quota/name, HTTPS browser login, HttpOnly cookie, LAN auth, revocation, no page errors.'
+    'Passed: Electron integration, live quota/name, automatic URL login, URL cleanup, manual login, HttpOnly cookie, LAN auto-login, old-link revocation, QR rendering, no page errors.'
   )
 } finally {
   if (browser) await browser.close()

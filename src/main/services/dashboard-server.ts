@@ -133,17 +133,23 @@ export class DashboardServer {
     )
     await rename(next, this.options.file)
   }
+  private accessUrl(base: string) {
+    if (!base) return ''
+    const url = new URL(base)
+    url.hash = new URLSearchParams({ code: this.password }).toString()
+    return url.href
+  }
   state(): DashboardState {
     return {
       publicCheck: { ...this.check!.state },
       settings: { ...this.settings },
       running: !!this.tls?.listening,
-      localUrl: `https://localhost:${this.settings.port}`,
+      localUrl: this.accessUrl(`https://localhost:${this.settings.port}`),
       lanUrls:
         this.settings.lan && this.tls?.listening
-          ? lanAddresses().map((ip) => `https://${ip}:${this.settings.port}`)
+          ? lanAddresses().map((ip) => this.accessUrl(`https://${ip}:${this.settings.port}`))
           : [],
-      publicUrl: this.tunnel.url,
+      publicUrl: this.accessUrl(this.tunnel.url),
       tunnelOrigin: `http://127.0.0.1:${this.settings.port + 1}`,
       tunnel: this.tunnel.state,
       error: this.error || this.tunnel.error,

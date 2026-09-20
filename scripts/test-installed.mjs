@@ -188,7 +188,7 @@ try {
   assert.ok(scripts.length > 0, 'Packaged mobile assets must exist')
   for (const [, asset] of scripts)
     assert.equal((await http.get(new URL(asset, dashboard.localUrl).href)).status(), 200)
-  assert.equal((await http.get(dashboard.localUrl + '/api/snapshot')).status(), 401)
+  assert.equal((await http.get(new URL('/api/snapshot', dashboard.localUrl).href)).status(), 401)
   await page.screenshot({ path: join(artifacts, 'installed.png') })
   assert.deepEqual(errors, [])
   await writeFile(

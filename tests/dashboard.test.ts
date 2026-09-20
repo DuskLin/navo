@@ -75,6 +75,11 @@ test('dashboard HTTPS authentication, isolation, revocation and request limits',
       port += 2
     }
     assert.equal(server.state().running, true)
+    const initialUrl = server.state().localUrl
+    const linkCode = (url: string) => new URLSearchParams(new URL(url).hash.slice(1)).get('code')
+    assert.equal(linkCode(initialUrl), server.accessCode())
+    for (const url of server.state().lanUrls) assert.equal(linkCode(url), server.accessCode())
+    assert.equal(server.state().publicUrl, '')
     const origin = `https://localhost:${port}`
     function call(
       path: string,
@@ -124,6 +129,7 @@ test('dashboard HTTPS authentication, isolation, revocation and request limits',
     assert.equal(reads, 0)
     assert.equal((await call('/api/snapshot', 'GET', undefined, {}, true)).status, 403)
     server.tunnel.url = 'https://quota.example.com'
+    assert.equal(linkCode(server.state().publicUrl), server.accessCode())
     const publicHeaders = {
       host: 'quota.example.com',
       origin: 'https://quota.example.com',
@@ -216,6 +222,8 @@ test('dashboard HTTPS authentication, isolation, revocation and request limits',
       assert.equal((await call(path, 'GET', undefined, { cookie })).status, 404)
     assert.equal((await call('/api/account/delete', 'POST', {}, { cookie })).status, 404)
     await server.rotate()
+    assert.notEqual(server.state().localUrl, initialUrl)
+    assert.equal((await call('/api/login', 'POST', { code: linkCode(initialUrl) })).status, 401)
     assert.equal((await call('/api/snapshot', 'GET', undefined, { cookie })).status, 401)
     const logged = await call('/api/login', 'POST', { code: server.accessCode() })
     const nextCookie = logged.headers['set-cookie']![0].split(';')[0]
@@ -229,7 +237,10 @@ test('dashboard HTTPS authentication, isolation, revocation and request limits',
     assert.equal(result, 429)
     const saved = await readFile(join(directory, 'dashboard.json'), 'utf8')
     assert.ok(!saved.includes(server.accessCode()))
-    assert.ok(!JSON.stringify(server.state()).includes(server.accessCode()))
+    assert.equal(
+      new URLSearchParams(new URL(server.state().localUrl).hash.slice(1)).get('code'),
+      server.accessCode()
+    )
   } finally {
     await server.close()
     await rm(directory, { recursive: true, force: true })

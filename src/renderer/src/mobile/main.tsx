@@ -826,13 +826,61 @@ function LiveApp() {
       clearTimeout(timeout)
     }
   }, [])
+  const authenticate = useCallback(
+    async (accessCode: string) => {
+      setBusy(true)
+      setMessage('')
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: accessCode.trim() }),
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(15000)
+        })
+        setCode('')
+        if (!response.ok) {
+          setNeedLogin(true)
+          setMessage(
+            response.status === 429 ? '尝试过多，请 15 分钟后重试。' : '访问码不正确或已过期。'
+          )
+          return
+        }
+        await reload()
+      } catch {
+        setNeedLogin(true)
+        setMessage('无法连接，请稍后重试。')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [reload]
+  )
   useEffect(() => {
-    void reload()
+    let authenticating = false
+    const connect = async () => {
+      if (authenticating) return
+      const params = new URLSearchParams(location.hash.slice(1))
+      if (params.has('code')) {
+        const accessCode = params.get('code') ?? ''
+        // Remove the credential before rendering routes or making any network requests.
+        history.replaceState(history.state, '', location.pathname + location.search)
+        authenticating = true
+        try {
+          await authenticate(accessCode)
+        } finally {
+          authenticating = false
+        }
+      } else {
+        await reload()
+      }
+    }
+    void connect()
     const interval = setInterval(() => {
-      if (!document.hidden) void reload()
+      if (!document.hidden) void connect()
     }, 30000)
     const changed = () => {
-      void reload()
+      void connect()
     }
     window.addEventListener('hashchange', changed)
     document.addEventListener('visibilitychange', changed)
@@ -842,32 +890,10 @@ function LiveApp() {
       window.removeEventListener('hashchange', changed)
       document.removeEventListener('visibilitychange', changed)
     }
-  }, [reload])
+  }, [reload, authenticate])
   async function login(event: React.FormEvent) {
     event.preventDefault()
-    setBusy(true)
-    setMessage('')
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code.trim() }),
-        credentials: 'same-origin',
-        signal: AbortSignal.timeout(15000)
-      })
-      setCode('')
-      if (!response.ok) {
-        setMessage(
-          response.status === 429 ? '尝试过多，请 15 分钟后重试。' : '访问码不正确或已过期。'
-        )
-        return
-      }
-      await reload()
-    } catch {
-      setMessage('无法连接，请稍后重试。')
-    } finally {
-      setBusy(false)
-    }
+    await authenticate(code)
   }
   async function logout() {
     try {

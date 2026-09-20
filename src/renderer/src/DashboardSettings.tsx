@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { SettingsToggle } from './SettingsToggle'
 import { Copy, ExternalLink, ShieldCheck, RefreshCw } from 'lucide-react'
 import type { DashboardSettings as Settings, DashboardState } from '../../shared/dashboard'
@@ -245,6 +246,22 @@ export function DashboardSettings() {
                 )}
               </div>
             </div>
+            {state.publicUrl && state.running && (
+              <div className="dashboard-qr">
+                <QRCodeSVG
+                  value={state.publicUrl}
+                  size={176}
+                  level="M"
+                  marginSize={4}
+                  title="扫码打开远程仪表盘"
+                />
+                <div>
+                  <strong>扫码直接访问</strong>
+                  <p>使用手机相机扫码，无需输入访问码。</p>
+                  <p>二维码与公网链接同步更新。</p>
+                </div>
+              </div>
+            )}
             {state.settings.tunnelMode !== 'off' && (
               <div className="dashboard-connection-meta">
                 <details className="dashboard-disclosure">
@@ -296,7 +313,7 @@ export function DashboardSettings() {
                   <ShieldCheck size={15} />
                   访问安全
                 </h3>
-                <p>链接不含访问码，请分开发送。登录有效期为 8 小时。</p>
+                <p>所有链接及二维码均包含访问码，请仅分享给可信任的人。登录有效期为 8 小时。</p>
               </div>
               <button
                 className="button"
@@ -320,7 +337,7 @@ export function DashboardSettings() {
               </p>
               <code className="dashboard-fingerprint">{state.fingerprint || '启用后生成'}</code>
               <div className="dashboard-reset-row">
-                <span>重置后，所有已登录设备立即退出。</span>
+                <span>重置后，所有已登录设备立即退出，旧链接与二维码失效。</span>
                 <button
                   className="button dashboard-danger"
                   disabled={busy}
