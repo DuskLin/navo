@@ -2726,3 +2726,27 @@ textarea {
 .star-welcome .modal-actions {
   flex-wrap: wrap;
 }
+
+/* OpenAI 与 Codex 共用用户提供的单色图标，随应用主题切换。 */
+:root[data-theme='dark'] img.openai-logo {
+  filter: invert(1);
+}
+
+.manual-model-entry {
+  margin: 16px 0;
+}
+.manual-model-entry > label {
+  display: block;
+  margin-bottom: 8px;
+}
+.manual-model-controls {
+  display: flex;
+  gap: 8px;
+}
+.manual-model-controls input {
+  flex: 1;
+  min-width: 0;
+}
+.manual-model-controls button {
+  flex-shrink: 0;
+}

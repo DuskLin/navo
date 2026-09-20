@@ -24,3 +24,5 @@ Model families resolve in `src/shared/model-brand.ts`, including provider-qualif
 Checked all 38 IDs in the [OpenCode Go model endpoint](https://opencode.ai/zen/go/v1/models) on 2026-09-17; [official model documentation](https://opencode.ai/docs/go/) identifies the available families. The supplied icon set contains no dedicated Union Alpha or Omen Alpha mark. Unknown families retain a neutral model icon.
 
 Icons retain original colors. Kimi's white mark uses a dark plate in both themes; other marks use a light plate.
+
+OpenAI 和 Codex 共用用户提供的 `/Users/liujialin/Downloads/openai.svg`；资源原样保存，深色主题通过 CSS 反色显示。

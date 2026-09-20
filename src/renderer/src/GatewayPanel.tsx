@@ -1,3 +1,4 @@
+import codexLogo from './assets/models/openai.svg'
 import { Modal } from './Modal'
 import {
   cloneElement,
@@ -334,6 +335,8 @@ function PerformanceHistory({
   )
 }
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
+  if (provider === 'codex')
+    return <img className="openai-logo" src={codexLogo} width={20} height={20} alt="Codex" />
   if (provider === 'opencode-go')
     return (
       <svg
@@ -812,6 +815,7 @@ export function GatewayPanel({
     AccountInput & { capabilities?: AccountCapabilities | null }
   >()
   const [rotatingKey, setRotatingKey] = useState(false)
+  const [confirmCodexImport, setConfirmCodexImport] = useState(false)
   const [deleting, setDeleting] = useState<{
     type: 'account'
     id: string
@@ -1355,11 +1359,13 @@ export function GatewayPanel({
                                       <div>
                                         <strong>{account.name}</strong>
                                         <small>
-                                          {account.provider === 'opencode-go'
-                                            ? 'OpenCode Go · 订阅'
-                                            : account.provider === 'deepseek'
-                                              ? 'DeepSeek · 按量付费'
-                                              : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
+                                          {account.provider === 'codex'
+                                            ? 'Codex · 本地认证'
+                                            : account.provider === 'opencode-go'
+                                              ? 'OpenCode Go · 订阅'
+                                              : account.provider === 'deepseek'
+                                                ? 'DeepSeek · 按量付费'
+                                                : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
                                         </small>
                                       </div>
                                     </div>
@@ -1655,10 +1661,85 @@ export function GatewayPanel({
               aria-label="实验性功能"
               className="settings-pane experiments-pane"
             >
-              <KimiDesktopSettings />
+              <KimiDesktopSettings>
+                <section className="lab-card" aria-label="Codex 本地认证">
+                  <header className="lab-card-heading">
+                    <span className="lab-icon">
+                      <ProviderLogo provider="codex" />
+                    </span>
+                    <div className="lab-heading-copy">
+                      <h3>Codex 本地认证</h3>
+                      <p>导入本机已登录的 ChatGPT 账号，通过本地网关使用 Codex 模型。</p>
+                    </div>
+                    <span className="lab-badge">实验性</span>
+                  </header>
+                  <footer className="lab-card-footer">
+                    <span className="muted">导入后可在「账号管理」中查看和管理。</span>
+                    <button
+                      className="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setError('')
+                        setConfirmCodexImport(true)
+                      }}
+                    >
+                      导入本地 Codex 认证
+                    </button>
+                  </footer>
+                </section>
+              </KimiDesktopSettings>
             </section>
           </div>
         </div>
+      )}
+      {confirmCodexImport && (
+        <Modal
+          title="导入 Codex 认证风险提醒"
+          close={() => {
+            if (!busyRef.current) setConfirmCodexImport(false)
+          }}
+        >
+          <p>此功能为实验性功能。继续前，请了解以下风险：</p>
+          <ul>
+            <li>
+              将 ChatGPT
+              订阅用于本地网关或其他客户端可能存在合规风险，并可能触发服务商风控、限流或账号限制。请自行确认用途符合服务商要求。
+            </li>
+            <li>
+              导入会读取本机 Codex 登录凭据，并加密保存在 Navo
+              中。通过网关发起的请求会使用该账号的权限与额度；开启局域网共享后，持有网关密钥的设备也可使用。
+            </li>
+            <li>
+              本机 Codex
+              与网关共用认证时，令牌刷新可能相互影响，导致登录失效；届时需要重新登录并导入。
+            </li>
+          </ul>
+          <p className="muted">请仅导入你有权使用的账号，并在了解上述风险后继续。</p>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="modal-actions">
+            <button className="button" disabled={busy} onClick={() => setConfirmCodexImport(false)}>
+              取消
+            </button>
+            <button
+              className="button primary"
+              disabled={busy}
+              onClick={() =>
+                void action(
+                  () => api.importCodexAccount(),
+                  'Codex 认证已导入，可前往账号管理查看'
+                ).then((ok) => {
+                  if (ok) setConfirmCodexImport(false)
+                })
+              }
+            >
+              {busy ? '正在导入…' : '我已了解，继续导入'}
+            </button>
+          </div>
+        </Modal>
       )}
       {accountEdit && (
         <AccountEditor
@@ -1748,6 +1829,8 @@ function AccountEditor({
   saved: (data: GatewaySnapshot) => void
 }) {
   const [draft, setDraft] = useState(input)
+  const [manualModel, setManualModel] = useState('')
+  const [manualModelError, setManualModelError] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [capabilities, setCapabilities] = useState<AccountCapabilities | null>(
@@ -1766,12 +1849,33 @@ function AccountEditor({
     }
     setDraft((d) => ({
       ...d,
-      ...(key === 'provider' ? { secret: '', modelProtocols: {}, excludedModels: [] } : {}),
+      ...(key === 'provider'
+        ? { secret: '', modelProtocols: {}, excludedModels: [], manualModels: [] }
+        : {}),
       [key]: value
     }))
   }
-  const visibleModels =
-    capabilities?.models.filter((model) => !draft.excludedModels?.includes(model)) ?? []
+  const visibleModels = [
+    ...new Set([...(capabilities?.models ?? []), ...(draft.manualModels ?? [])])
+  ].filter((model) => !draft.excludedModels?.includes(model))
+  function addManualModel() {
+    const model = manualModel.trim()
+    if (!model || model.length > 200 || /[\s\x00-\x1f\x7f]/.test(model)) {
+      setManualModelError('请输入有效的模型 ID，最多 200 个字符，不能包含空格或控制字符。')
+      return
+    }
+    if ((draft.manualModels?.length ?? 0) >= 2000 && !draft.manualModels?.includes(model)) {
+      setManualModelError('手动模型最多添加 2000 个。')
+      return
+    }
+    setDraft((current) => ({
+      ...current,
+      manualModels: [...new Set([...(current.manualModels ?? []), model])],
+      excludedModels: current.excludedModels?.filter((id) => id !== model)
+    }))
+    setManualModel('')
+    setManualModelError('')
+  }
   async function inspect() {
     const version = ++probeVersion.current
     setReading(true)
@@ -1831,9 +1935,11 @@ function AccountEditor({
           </Field>
           <Field label="供应商">
             <select
+              disabled={input.provider === 'codex'}
               value={draft.provider ?? 'kimi'}
               onChange={(e) => change('provider', e.target.value as AccountInput['provider'])}
             >
+              {input.provider === 'codex' && <option value="codex">Codex · 本地认证</option>}
               <option value="kimi">Kimi Code</option>
               <option value="deepseek">DeepSeek · 按量付费</option>
               <option value="opencode-go">OpenCode Go · 订阅</option>
@@ -1850,30 +1956,37 @@ function AccountEditor({
               </select>
             </Field>
           )}
-          <Field
-            label="API Key"
-            hint={
-              input.id
-                ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
-                : draft.provider === 'opencode-go'
-                  ? '填写已订阅 Go 的 OpenCode API Key。'
-                  : draft.provider === 'deepseek'
-                    ? '填写 DeepSeek 开放平台生成的密钥。'
-                    : '填写 Kimi Code 控制台生成的密钥。'
-            }
-          >
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={draft.secret ?? ''}
-              required={!input.id || (draft.provider ?? 'kimi') !== (input.provider ?? 'kimi')}
-              placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
-              onChange={(e) => change('secret', e.target.value)}
-              onBlur={() => {
-                if (draft.secret?.trim()) void inspect()
-              }}
-            />
-          </Field>
+          {draft.provider !== 'codex' && (
+            <Field
+              label="API Key"
+              hint={
+                input.id
+                  ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
+                  : draft.provider === 'opencode-go'
+                    ? '填写已订阅 Go 的 OpenCode API Key。'
+                    : draft.provider === 'deepseek'
+                      ? '填写 DeepSeek 开放平台生成的密钥。'
+                      : '填写 Kimi Code 控制台生成的密钥。'
+              }
+            >
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={draft.secret ?? ''}
+                required={!input.id || (draft.provider ?? 'kimi') !== (input.provider ?? 'kimi')}
+                placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
+                onChange={(e) => change('secret', e.target.value)}
+                onBlur={() => {
+                  if (draft.secret?.trim()) void inspect()
+                }}
+              />
+            </Field>
+          )}
+          {draft.provider === 'codex' && (
+            <p className="muted">
+              认证来自本地 Codex，更新凭据请前往「实验性功能 → 导入本地 Codex 认证」。
+            </p>
+          )}
           <Field label="上游 Base URL" hint="由供应商和区域自动确定，转发时按协议选择端点。">
             <input type="url" readOnly value={accountBaseUrl(draft.region, draft.provider)} />
           </Field>
@@ -1959,6 +2072,43 @@ function AccountEditor({
               API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
               删除仅作用于此账号，保存后生效，上游同步不会恢复已删除模型。
             </p>
+            <div className="manual-model-entry">
+              <label htmlFor="manual-model-id">手动添加模型</label>
+              <div className="manual-model-controls">
+                <input
+                  id="manual-model-id"
+                  value={manualModel}
+                  maxLength={200}
+                  placeholder="填写模型 ID，如 gpt-6-astra"
+                  onChange={(event) => {
+                    setManualModel(event.target.value)
+                    setManualModelError('')
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                      event.preventDefault()
+                      addManualModel()
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!manualModel.trim()}
+                  onClick={addManualModel}
+                >
+                  添加模型
+                </button>
+              </div>
+              <p className="model-protocols-hint">
+                用于补充上游未列出的模型，保存账号后生效；刷新时保留，实际可用性取决于上游账号权限。
+              </p>
+              {manualModelError && (
+                <p className="form-error" role="alert">
+                  {manualModelError}
+                </p>
+              )}
+            </div>
             {reading ? (
               <p className="muted" role="status">
                 正在获取…
@@ -1984,12 +2134,16 @@ function AccountEditor({
                         <tr key={model}>
                           <th scope="row" title={model}>
                             {model}
+                            {draft.manualModels?.includes(model) && (
+                              <span className="badge">手动</span>
+                            )}
                           </th>
                           {MODEL_PROTOCOLS.map((p) => (
                             <td key={p.value}>
                               <input
                                 type="checkbox"
                                 aria-label={`${model} ${p.label}`}
+                                disabled={draft.provider === 'codex'}
                                 checked={selected.includes(p.value)}
                                 onChange={(event) => {
                                   const next = event.target.checked
@@ -2083,7 +2237,9 @@ function SettingsEditor({
   running: boolean
   saved: (data: GatewaySnapshot) => void
 }) {
-  const [draft, setDraft] = useState(input),
+  const [draft, setDraft] = useState(input)
+  const [manualModel, setManualModel] = useState('')
+  const [manualModelError, setManualModelError] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false)
   const [confirmLanSharing, setConfirmLanSharing] = useState(false)
@@ -2256,7 +2412,12 @@ const priceFields = [
   ['cacheRead', '缓存读取'],
   ['cacheWrite', '缓存写入']
 ] as const
-const providerNames = { kimi: 'Kimi Code', deepseek: 'DeepSeek', 'opencode-go': 'OpenCode Go' }
+const providerNames = {
+  codex: 'Codex',
+  kimi: 'Kimi Code',
+  deepseek: 'DeepSeek',
+  'opencode-go': 'OpenCode Go'
+}
 
 function ModelPricing({
   snapshot,

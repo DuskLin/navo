@@ -11,11 +11,13 @@ export function defaultModelProtocols(
   provider: AccountInput['provider'],
   model: string
 ): ModelProtocol[] {
+  if (provider === 'codex') return ['responses']
   return provider === 'opencode-go'
     ? [MODEL_PROTOCOLS.find((p) => p.route === openCodeGoRoute(model))!.value]
     : MODEL_PROTOCOLS.map((p) => p.value)
 }
 export function supportedModelProtocols(account: Configuration, model: string): ModelProtocol[] {
+  if (account.provider === 'codex') return ['responses']
   return account.modelProtocols && Object.hasOwn(account.modelProtocols, model)
     ? account.modelProtocols[model]
     : defaultModelProtocols(account.provider, model)
@@ -26,6 +28,7 @@ export function modelUpstreamRoute(
   incoming: string
 ): string {
   if (incoming === '/v1/messages/count_tokens') return incoming
+  if (account.provider === 'codex') return '/v1/responses'
   const supported = supportedModelProtocols(account, model)
   const direct = MODEL_PROTOCOLS.find((p) => p.route === incoming)
   if (direct && supported.includes(direct.value)) return incoming

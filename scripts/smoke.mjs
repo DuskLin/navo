@@ -6,6 +6,25 @@ import { _electron as electron } from 'playwright'
 import { createServer } from 'node:http'
 
 const userData = await mkdtemp(join(tmpdir(), 'navo-smoke-'))
+const codexHome = join(userData, 'codex')
+await mkdir(codexHome)
+const codexToken =
+  'smoke.' +
+  Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, sub: 'smoke-user' })
+  ).toString('base64url') +
+  '.signature'
+await writeFile(
+  join(codexHome, 'auth.json'),
+  JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      access_token: codexToken,
+      refresh_token: 'smoke-codex-refresh',
+      account_id: 'smoke-codex-account'
+    }
+  })
+)
 const artifacts = resolve('artifacts')
 await mkdir(artifacts, { recursive: true })
 const errors = []
@@ -18,6 +37,35 @@ let pricingRequests = 0
 const fiveHourReset = new Date(Date.now() + 4 * 3600000).toISOString()
 const weeklyReset = new Date(Date.now() + 6 * 86400000).toISOString()
 const upstream = createServer((req, res) => {
+  if (req.url === '/backend-api/wham/usage') {
+    assert.equal(req.headers.authorization, 'Bearer ' + codexToken)
+    assert.equal(req.headers['chatgpt-account-id'], 'smoke-codex-account')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        rate_limit: {
+          primary_window: {
+            limit_window_seconds: 18000,
+            used_percent: 25,
+            reset_at: Math.floor(Date.parse(fiveHourReset) / 1000)
+          },
+          secondary_window: {
+            limit_window_seconds: 604800,
+            used_percent: 40,
+            reset_at: Math.floor(Date.parse(weeklyReset) / 1000)
+          }
+        }
+      })
+    )
+    return
+  }
+  if (req.url.startsWith('/backend-api/codex/models?')) {
+    assert.equal(req.headers.authorization, 'Bearer ' + codexToken)
+    assert.equal(req.headers['chatgpt-account-id'], 'smoke-codex-account')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ models: [{ slug: 'gpt-codex-smoke' }] }))
+    return
+  }
   if (req.url === '/api.json') {
     pricingRequests++
     assert.equal(req.headers.authorization, undefined)
@@ -140,7 +188,7 @@ await writeFile(
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
-    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai', 'models.dev'].includes(url.hostname)) {
+    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai', 'models.dev', 'chatgpt.com'].includes(url.hostname)) {
       return realFetch('http://127.0.0.1:${upstreamPort}' + url.pathname + url.search, init);
     }
     return realFetch(input, init);
@@ -154,7 +202,7 @@ const gatewayPort = reservation.address().port
 await new Promise((resolve) => reservation.close(resolve))
 
 async function launch() {
-  const env = { ...process.env, NAVO_TEST_USER_DATA: userData }
+  const env = { ...process.env, NAVO_TEST_USER_DATA: userData, CODEX_HOME: codexHome }
   delete env.ELECTRON_RUN_AS_NODE
   application = await electron.launch({ args: [testEntry], env })
   const page = await application.firstWindow()
@@ -288,6 +336,66 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   assert.equal(await page.getByRole('tab', { name: '分组管理' }).count(), 0)
+  assert.equal(
+    await page.getByRole('button', { name: '导入本地 Codex 认证', exact: true }).count(),
+    0
+  )
+  await page.getByRole('button', { name: '实验性功能', exact: true }).click()
+  // 使用临时登录文件和模拟上游，验证完整主进程/预加载/界面导入链路。
+  await page.getByRole('button', { name: '导入本地 Codex 认证', exact: true }).click()
+  const codexRisk = page.getByRole('dialog', { name: '导入 Codex 认证风险提醒' })
+  await codexRisk.waitFor()
+  assert.equal((await page.evaluate(() => window.navo.getGateway())).accounts.length, 0)
+  await page.screenshot({ path: join(artifacts, 'codex-import-risk.png') })
+  await codexRisk.getByRole('button', { name: '取消', exact: true }).click()
+  assert.equal((await page.evaluate(() => window.navo.getGateway())).accounts.length, 0)
+  await page.getByRole('button', { name: '导入本地 Codex 认证', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: '导入 Codex 认证风险提醒' })
+    .getByRole('button', { name: '我已了解，继续导入' })
+    .click()
+  await page.getByRole('dialog', { name: '导入 Codex 认证风险提醒' }).waitFor({ state: 'hidden' })
+  await page.waitForFunction(async () => (await window.navo.getGateway()).accounts.length === 1)
+  const codexSnapshot = await page.evaluate(() => window.navo.getGateway())
+  const importedCodex = codexSnapshot.accounts[0]
+  assert.equal(importedCodex.provider, 'codex')
+  assert.equal(importedCodex.kind, 'oauth')
+  assert.equal(importedCodex.capabilities.quota.fiveHour.remaining, 75)
+  assert.equal(importedCodex.capabilities.quota.weekly.remaining, 60)
+  assert.ok(!JSON.stringify(codexSnapshot).includes(codexToken))
+  assert.ok(!JSON.stringify(codexSnapshot).includes('smoke-codex-refresh'))
+  await page.getByRole('button', { name: '导入本地 Codex 认证', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: '导入 Codex 认证风险提醒' })
+    .getByRole('button', { name: '我已了解，继续导入' })
+    .click()
+  await page.getByRole('dialog', { name: '导入 Codex 认证风险提醒' }).waitFor({ state: 'hidden' })
+  await page.waitForFunction(async () => (await window.navo.getGateway()).accounts.length === 1)
+  await page.screenshot({ path: join(artifacts, 'codex-experimental.png') })
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
+  const codexRow = page.getByRole('row').filter({ hasText: importedCodex.name })
+  await codexRow.getByRole('button', { name: '编辑', exact: true }).click()
+  const codexDialog = page.getByRole('dialog', { name: '编辑账号' })
+  assert.equal(await codexDialog.getByLabel('API Key', { exact: true }).count(), 0)
+  assert.equal(await codexDialog.getByLabel('供应商', { exact: true }).isDisabled(), true)
+  await codexDialog.getByLabel('手动添加模型', { exact: true }).fill('gpt-6-astra')
+  await codexDialog.getByRole('button', { name: '添加模型', exact: true }).click()
+  const manualRow = codexDialog.getByRole('row').filter({ hasText: 'gpt-6-astra' })
+  await manualRow.getByText('手动', { exact: true }).waitFor()
+  await page.screenshot({ path: join(artifacts, 'codex-import.png') })
+  await codexDialog.getByRole('button', { name: '保存账号', exact: true }).click()
+  await codexDialog.waitFor({ state: 'hidden' })
+  const refreshedCodex = await page.evaluate(
+    (id) => window.navo.refreshAccount(id),
+    importedCodex.id
+  )
+  assert.ok(
+    refreshedCodex.accounts.find((a) => a.id === importedCodex.id).models.includes('gpt-6-astra')
+  )
+  await page.evaluate((id) => window.navo.deleteAccount(id), importedCodex.id)
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
   for (const name of ['开发账号 A', '开发账号 B']) {
     await page.getByRole('button', { name: '添加账号', exact: true }).click()
     assert.equal(

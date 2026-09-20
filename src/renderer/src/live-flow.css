@@ -1207,3 +1207,7 @@
 .live-flow-panel .flow-node.model .flow-token-count {
   margin-top: 10px;
 }
+
+:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='openai'] {
+  filter: invert(1);
+}

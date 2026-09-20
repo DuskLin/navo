@@ -1,3 +1,4 @@
+import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable, Transform } from 'node:stream'
@@ -117,6 +118,7 @@ export class Gateway {
   }
   private activeRequests = new Set<Promise<void>>()
   private transitions: Promise<unknown> = Promise.resolve()
+  readonly codex: CodexAuth
   private error = ''
   private requests: RequestRecord[] = []
   readonly history: RequestHistory
@@ -134,6 +136,7 @@ export class Gateway {
       () => (this.store.get().settings.flowIdleMinutes ?? 5) * 60000
     )
     this.pricing = new ModelPriceCatalog(store.priceCachePath, catalogRequest)
+    this.codex = new CodexAuth(store, metadataRequest)
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
     this.requests = this.history.page().records
@@ -297,12 +300,22 @@ export class Gateway {
       return this.snapshot()
     })
   }
+  async importCodexAccount(): Promise<GatewaySnapshot> {
+    const id = await this.codex.importLocal()
+    this.scheduler.reset(id)
+    return this.snapshot()
+  }
   async saveAccount(value: unknown): Promise<GatewaySnapshot> {
     const input = validateAccount(value, this.store.get().groups)
     const old = this.store.get().accounts.find((a) => a.id === input.id)
     if (input.id && !old) throw new Error('账号不存在')
     if (old && old.provider !== input.provider && !input.secret)
       throw new Error('切换供应商请填写新的 API Key')
+    if (input.provider === 'codex') {
+      if (!old || old.provider !== 'codex') throw new Error('请先导入本地 Codex 认证')
+      await this.store.saveAccount(input, old.capabilities ?? undefined)
+      return this.snapshot()
+    }
     const key = input.secret || old?.credential.accessToken
     if (!key) throw new Error('请填写 API Key')
     const needsRefresh =
@@ -329,6 +342,10 @@ export class Gateway {
     const provider = validateProvider(input.provider ?? old?.provider)
     if (old && provider !== old.provider && !input.secret)
       throw new Error('切换供应商请填写新的 API Key')
+    if (provider === 'codex') {
+      if (!old || old.provider !== 'codex') throw new Error('请先导入本地 Codex 认证')
+      return this.codex.models(await this.codex.credential(old.id))
+    }
     const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
     return this.capabilities.get(input.region as Region, key, false, provider)
@@ -337,13 +354,18 @@ export class Gateway {
     const id = string(value, '账号 ID')
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
-    const capabilities = await this.capabilities.get(
-      old.region,
-      old.credential.accessToken,
-      true,
-      old.provider,
-      signal
-    )
+    const credential =
+      old.provider === 'codex' ? await this.codex.credential(old.id) : old.credential
+    const capabilities =
+      old.provider === 'codex'
+        ? await this.codex.models(credential, signal)
+        : await this.capabilities.get(
+            old.region,
+            old.credential.accessToken,
+            true,
+            old.provider,
+            signal
+          )
     signal?.throwIfAborted()
     await this.store.mutate((data) => {
       signal?.throwIfAborted()
@@ -352,7 +374,7 @@ export class Gateway {
         !account ||
         account.region !== old.region ||
         account.provider !== old.provider ||
-        account.credential.accessToken !== old.credential.accessToken
+        account.credential.accessToken !== credential.accessToken
       )
         throw new Error('账号已变更，请重新同步')
       // 用量接口失败时保留上次真实额度及其时间，不能把旧额度标成刚获取。
@@ -373,7 +395,8 @@ export class Gateway {
           refreshed,
           account.concurrencyOverride,
           account.provider,
-          account.excludedModels
+          account.excludedModels,
+          account.manualModels
         )
       )
     })
@@ -639,9 +662,16 @@ export class Gateway {
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
         try {
-          const token = account.credential.accessToken
+          const credential =
+            account.provider === 'codex'
+              ? await this.codex.credential(account.id)
+              : account.credential
+          const token = credential.accessToken
           if (controller.signal.aborted) break
-          if (account.provider === 'opencode-go' && route === '/v1/messages/count_tokens') {
+          if (
+            (account.provider === 'opencode-go' || account.provider === 'codex') &&
+            route === '/v1/messages/count_tokens'
+          ) {
             finalStatus = 200
             res.writeHead(200, {
               'content-type': 'application/json',
@@ -652,10 +682,15 @@ export class Gateway {
           }
           const targetRoute = modelUpstreamRoute(account, model, route)
           const converted =
-            targetRoute !== route
+            targetRoute !== route || (account.provider === 'codex' && payload.stream !== true)
               ? convertRequest(payload, routeProtocol(route), routeProtocol(targetRoute))
               : undefined
-          const requestBody = converted ? Buffer.from(JSON.stringify(converted.body)) : body
+          const requestBody =
+            account.provider === 'codex'
+              ? Buffer.from(JSON.stringify(codexRequest(converted?.body ?? payload)))
+              : converted
+                ? Buffer.from(JSON.stringify(converted.body))
+                : body
           const headers = new Headers({
             'content-type': 'application/json',
             authorization: `Bearer ${token}`,
@@ -675,6 +710,13 @@ export class Gateway {
               headers.delete('anthropic-version')
               headers.delete('anthropic-beta')
             }
+          }
+          if (account.provider === 'codex') {
+            for (const [name, value] of Object.entries(codexHeaders(credential)))
+              headers.set(name, value)
+            headers.delete('anthropic-version')
+            headers.delete('anthropic-beta')
+            headers.set('session_id', goSession)
           }
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           const upstream = await this.request(

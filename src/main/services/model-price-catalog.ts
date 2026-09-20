@@ -13,6 +13,7 @@ import { object, validateModelPrice } from './gateway-store'
 export const MODEL_PRICE_API = 'https://models.dev/api.json'
 export const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000
 export const catalogProviders: Record<Provider, string> = {
+  codex: 'openai',
   kimi: 'kimi-for-coding',
   deepseek: 'deepseek',
   'opencode-go': 'opencode-go'

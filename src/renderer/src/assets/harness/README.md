@@ -5,7 +5,7 @@ Source: user-provided `/Users/liujialin/Downloads/lobe-icons-static-svg/icons` (
 - Zcode: `zai.svg` (Z.ai brand fallback; no dedicated Zcode icon in the supplied set)
 - Kimi Code: `kimi-color.svg`
 - Claude Code: `claudecode-color.svg`
-- Codex: `codex-color.svg`
+- Codex: `../models/openai.svg`（用户提供的 `/Users/liujialin/Downloads/openai.svg`，与 OpenAI 共用并适配明暗主题）
 - Qoder: `qoder-color.svg`
 - WorkBuddy: `codebuddy-color.svg` (CodeBuddy brand fallback; no dedicated WorkBuddy icon in the supplied set)
 - Pi: `pi.svg`

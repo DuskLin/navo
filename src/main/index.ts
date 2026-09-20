@@ -328,6 +328,7 @@ void app
         modelPriceCatalog: service.pricing.snapshot()
       })
     })
+    handle(IPC.accountImportCodex, () => service.importCodexAccount())
     handle(IPC.accountSave, (value) => service.saveAccount(value))
     handle(IPC.accountInspect, (value) => service.inspectAccount(value))
     handle(IPC.accountRefresh, (value) => service.refreshAccount(value))

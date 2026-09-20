@@ -841,6 +841,9 @@ export async function* convertResponse(
 ): AsyncGenerator<Buffer> {
   const bridge = new ResponseBridge(options.target, options.context, options.outputStream)
   const decoder = new StringDecoder('utf8')
+  let nativeResponse: Wire | undefined
+  const preserveNative =
+    options.source === 'responses' && options.target === 'responses' && !options.outputStream
   if (!options.inputStream || !options.ok) {
     const buffers: Buffer[] = []
     let bytes = 0
@@ -879,6 +882,10 @@ export async function* convertResponse(
       )
       return
     }
+    if (preserveNative) {
+      yield Buffer.from(JSON.stringify(root))
+      return
+    }
     bridge.readJSON(root, options.source)
     if (options.outputStream) yield* bridge.drain()
     else yield Buffer.from(JSON.stringify(bridge.json()))
@@ -899,6 +906,11 @@ export async function* convertResponse(
       } catch {
         throw badResponse()
       }
+      if (
+        preserveNative &&
+        ['response.completed', 'response.incomplete'].includes(root.type ?? event)
+      )
+        nativeResponse = obj(root.response)
       bridge.readEvent(root, event, options.source)
     }
     event = ''
@@ -931,5 +943,5 @@ export async function* convertResponse(
     yield* bridge.drain()
   }
   if (!bridge.finished) throw badResponse()
-  if (!options.outputStream) yield Buffer.from(JSON.stringify(bridge.json()))
+  if (!options.outputStream) yield Buffer.from(JSON.stringify(nativeResponse ?? bridge.json()))
 }

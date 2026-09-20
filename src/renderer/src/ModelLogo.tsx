@@ -35,7 +35,7 @@ export function ModelLogo({ model }: { model: string }) {
   const brand = modelBrand(model)
   return brand ? (
     <img
-      className="model-logo"
+      className={`model-logo${brand === 'openai' ? ' openai-logo' : ''}`}
       data-brand={brand}
       src={logos[brand]}
       alt={`${model} Logo`}

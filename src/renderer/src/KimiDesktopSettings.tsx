@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Monitor, RefreshCw, FlaskConical } from 'lucide-react'
 import { SessionMigrationSettings } from './SessionMigrationSettings'
 import { SettingsToggle } from './SettingsToggle'
 import type { KimiDesktopState, KimiDesktopPreferences } from '../../shared/kimi-desktop'
 import './experimental.css'
 
-export function KimiDesktopSettings() {
+export function KimiDesktopSettings({ children }: { children?: ReactNode }) {
   const [state, setState] = useState<KimiDesktopState>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,6 +67,7 @@ export function KimiDesktopSettings() {
         </div>
         <span className="lab-badge">预览</span>
       </header>
+      {children}
       <section className="lab-card" aria-label="Kimi Code Desktop 集成">
         <header className="lab-card-heading">
           <span className="lab-icon">

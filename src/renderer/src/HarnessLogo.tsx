@@ -1,7 +1,7 @@
 import zai from './assets/harness/zai.svg'
 import kimi from './assets/harness/kimi-color.svg'
 import claude from './assets/harness/claudecode-color.svg'
-import codex from './assets/harness/codex-color.svg'
+import codex from './assets/models/openai.svg'
 import qoder from './assets/harness/qoder-color.svg'
 import codebuddy from './assets/harness/codebuddy-color.svg'
 import pi from './assets/harness/pi.svg'
@@ -26,7 +26,7 @@ export function HarnessLogo({ name }: { name: string }) {
   const src = logos[name]
   return src ? (
     <img
-      className="flow-harness-logo"
+      className={`flow-harness-logo${name === 'Codex' ? ' openai-logo' : ''}`}
       data-brand={name}
       src={src}
       alt={`${name} Logo`}

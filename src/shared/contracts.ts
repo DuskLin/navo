@@ -52,6 +52,7 @@ export interface HelperApi {
     query: import('./quota-cost').QuotaCycleQuery
   ): Promise<import('./quota-cost').QuotaCostCycle[]>
   setQuotaCycleExcluded(input: import('./quota-cost').QuotaCycleExclusion): Promise<GatewaySnapshot>
+  importCodexAccount(): Promise<GatewaySnapshot>
   saveAccount(input: AccountInput): Promise<GatewaySnapshot>
   inspectAccount(input: AccountProbe): Promise<AccountCapabilities>
   refreshAccount(id: string): Promise<GatewaySnapshot>
@@ -71,7 +72,7 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
-export type Provider = 'kimi' | 'deepseek' | 'opencode-go'
+export type Provider = 'kimi' | 'deepseek' | 'opencode-go' | 'codex'
 export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
 export type Strategy = 'balanced'
@@ -87,12 +88,13 @@ export interface AccountInput {
   provider?: Provider
   id?: string
   name: string
-  kind: 'api-key'
+  kind: 'api-key' | 'oauth'
   region: Region
   enabled: boolean
   concurrencyOverride?: number | null
   modelProtocols?: Record<string, ModelProtocol[]>
   excludedModels?: string[]
+  manualModels?: string[]
   memberships: Membership[]
   secret?: string
 }
@@ -139,6 +141,7 @@ export interface AccountBalance {
   balances: { currency: string; balance: number }[]
 }
 export function accountBaseUrl(region: Region, provider: Provider = 'kimi'): string {
+  if (provider === 'codex') return 'https://chatgpt.com/backend-api/codex'
   if (provider === 'opencode-go') return 'https://opencode.ai/zen/go/v1'
   return provider === 'deepseek' ? 'https://api.deepseek.com/v1' : kimiBaseUrl(region)
 }
@@ -293,6 +296,7 @@ export const IPC = {
   quotaCycles: 'gateway:quota-cycles',
   quotaCycleExclude: 'gateway:quota-cycle-exclude',
   usageStats: 'gateway:usage-stats',
+  accountImportCodex: 'account:import-codex',
   accountSave: 'account:save',
   accountInspect: 'account:inspect',
   accountRefresh: 'account:refresh',

@@ -19,6 +19,10 @@ import {
 
 export interface Credential {
   accessToken: string
+  refreshToken?: string
+  accountId?: string
+  userId?: string
+  expiresAt?: number
 }
 export interface StoredAccount extends Omit<AccountInput, 'id' | 'secret'> {
   id: string
@@ -92,7 +96,9 @@ export function validateGroup(value: unknown): GroupInput {
 export function validateAccount(value: unknown, groups: StoredGroup[]): AccountInput {
   const v = object(value)
   const provider = validateProvider(v.provider)
-  if (v.kind !== 'api-key') throw new Error('仅支持 API Key 接入')
+  if (v.kind !== (provider === 'codex' ? 'oauth' : 'api-key'))
+    throw new Error(provider === 'codex' ? 'Codex 仅支持本地 OAuth 认证' : '仅支持 API Key 接入')
+  if (provider === 'codex' && v.secret) throw new Error('请使用导入本地 Codex 认证更新凭据')
   if (!['mainland-cn', 'global'].includes(v.region as string)) throw new Error('账号区域无效')
   if (
     !Array.isArray(v.memberships) ||
@@ -118,7 +124,7 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
   return {
     ...(v.id !== undefined ? { id: string(v.id, '账号 ID') } : {}),
     name: string(v.name, '账号名称'),
-    kind: 'api-key',
+    kind: provider === 'codex' ? 'oauth' : 'api-key',
     provider,
     ...(v.modelProtocols !== undefined
       ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
@@ -126,6 +132,7 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
     ...(v.excludedModels !== undefined
       ? { excludedModels: validateExcludedModels(v.excludedModels) }
       : {}),
+    ...(v.manualModels !== undefined ? { manualModels: validateManualModels(v.manualModels) } : {}),
     region: v.region as AccountInput['region'],
     enabled: boolean(v.enabled),
     ...(v.concurrencyOverride !== undefined
@@ -143,7 +150,7 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
 
 export function validateProvider(value: unknown): Provider {
   if (value === undefined) return 'kimi'
-  if (value !== 'kimi' && value !== 'deepseek' && value !== 'opencode-go')
+  if (value !== 'kimi' && value !== 'deepseek' && value !== 'opencode-go' && value !== 'codex')
     throw new Error('账号供应商无效')
   return value
 }
@@ -171,12 +178,26 @@ function validateExcludedModels(value: unknown): string[] {
   return [...new Set(value.map((model) => string(model, '模型', 200)))]
 }
 
+export function validateManualModels(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 2000) throw new Error('手动模型列表无效')
+  return [
+    ...new Set(
+      value.map((model) => {
+        const id = string(model, '模型 ID', 200)
+        if (/[\s\x00-\x1f\x7f]/.test(id)) throw new Error('模型 ID 不能包含空格或控制字符')
+        return id
+      })
+    )
+  ]
+}
+
 export function capabilityFields(
   region: AccountInput['region'],
   value: unknown,
   concurrencyOverride: number | null = null,
   provider: Provider = 'kimi',
-  excludedModels: string[] = []
+  excludedModels: string[] = [],
+  manualModels: string[] = []
 ) {
   if (concurrencyOverride !== null) integer(concurrencyOverride, 1, 1000, '手动并发上限')
   let capabilities: AccountCapabilities | null = null
@@ -206,7 +227,9 @@ export function capabilityFields(
   }
   return {
     baseUrl: accountBaseUrl(region, provider),
-    models: (capabilities?.models ?? []).filter((model) => !excludedModels.includes(model)),
+    models: [...new Set([...(capabilities?.models ?? []), ...manualModels])].filter(
+      (model) => !excludedModels.includes(model)
+    ),
     maxConcurrency:
       concurrencyOverride ?? capabilities?.maxConcurrency ?? DEFAULT_ACCOUNT_CONCURRENCY,
     concurrencyOverride,
@@ -277,7 +300,7 @@ export class GatewayStore {
       })
       // 旧授权账号仅保留名称和分组，不把访问令牌当作 API Key。先保留加密备份，
       // 再迁移为停用且待填写密钥的账号；已有 API Key 账号可直接读取。
-      if (data.accounts.some((a) => object(a).kind === 'oauth')) {
+      if (data.accounts.some((a) => object(a).kind === 'oauth' && object(a).provider !== 'codex')) {
         try {
           await writeFile(`${this.file}.oauth-backup`, raw, { mode: 0o600, flag: 'wx' })
         } catch (error) {
@@ -286,7 +309,7 @@ export class GatewayStore {
       }
       const accounts = data.accounts.map((a) => {
         const item = object(a)
-        const legacy = item.kind === 'oauth'
+        const legacy = item.kind === 'oauth' && item.provider !== 'codex'
         const { secret: _secret, ...input } = validateAccount(
           legacy ? { ...item, kind: 'api-key', enabled: false } : item,
           groups
@@ -299,10 +322,25 @@ export class GatewayStore {
             legacy ? null : item.capabilities,
             input.concurrencyOverride,
             input.provider,
-            input.excludedModels
+            input.excludedModels,
+            input.manualModels
           ),
           id: string(item.id, '账号 ID'),
           credential: {
+            ...(input.provider === 'codex'
+              ? {
+                  accountId: string(c.accountId, 'Codex 账号 ID', 512),
+                  ...(c.userId ? { userId: string(c.userId, 'Codex 用户 ID', 16384) } : {}),
+                  ...(c.refreshToken
+                    ? { refreshToken: string(c.refreshToken, '刷新令牌', 16384) }
+                    : {}),
+                  ...(c.expiresAt !== undefined
+                    ? {
+                        expiresAt: integer(c.expiresAt, 0, Number.MAX_SAFE_INTEGER, '令牌过期时间')
+                      }
+                    : {})
+                }
+              : {}),
             accessToken:
               !input.enabled && c.accessToken === '' ? '' : string(c.accessToken, 'API Key', 16384)
           }
@@ -400,10 +438,13 @@ export class GatewayStore {
         input.modelProtocols ?? (old?.provider === input.provider ? old?.modelProtocols : undefined)
       const excludedModels =
         input.excludedModels ?? (old?.provider === input.provider ? old?.excludedModels : undefined)
+      const manualModels =
+        input.manualModels ?? (old?.provider === input.provider ? old?.manualModels : undefined)
       const account: StoredAccount = {
         ...input,
         ...(modelProtocols !== undefined ? { modelProtocols } : {}),
         ...(excludedModels !== undefined ? { excludedModels } : {}),
+        ...(manualModels !== undefined ? { manualModels } : {}),
         id,
         credential: nextCredential,
         ...capabilityFields(
@@ -413,7 +454,8 @@ export class GatewayStore {
             ? old?.concurrencyOverride
             : input.concurrencyOverride,
           input.provider,
-          excludedModels
+          excludedModels,
+          manualModels
         )
       }
       if (old) data.accounts[data.accounts.indexOf(old)] = account
