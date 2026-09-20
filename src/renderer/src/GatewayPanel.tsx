@@ -68,6 +68,7 @@ import { remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
 import { KimiLogo } from './KimiLogo'
+import minimaxLogo from './assets/models/minimax.svg'
 import deepseekLogo from './assets/deepseek.svg'
 import { LiveFlowPanel } from './LiveFlowPanel'
 import { UsageDashboard } from './UsageDashboard'
@@ -340,6 +341,8 @@ function PerformanceHistory({
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
   if (provider === 'codex')
     return <img className="openai-logo" src={codexLogo} width={20} height={20} alt="Codex" />
+  if (provider === 'minimax')
+    return <img className="minimax-logo" src={minimaxLogo} alt="MiniMax" />
   if (provider === 'opencode-go')
     return (
       <svg
@@ -1022,7 +1025,7 @@ export function GatewayPanel({
           {!linkedAccounts.length ? (
             <div className="quota-overview-empty">
               <Users size={24} />
-              <p>关联账号后，这里会展示 Kimi、OpenCode Go 剩余额度和 DeepSeek 余额。</p>
+              <p>关联账号后，这里会展示 Kimi、MiniMax、OpenCode Go 剩余额度和 DeepSeek 余额。</p>
               <button
                 className="text-button"
                 onClick={() => {
@@ -1329,7 +1332,7 @@ export function GatewayPanel({
                         </div>
                         <h2>添加第一个账号</h2>
                         <p>
-                          填写 Kimi Code、DeepSeek 或 OpenCode Go API Key 即可接入。
+                          填写 Kimi Code、DeepSeek、MiniMax 或 OpenCode Go API Key 即可接入。
                           <br />
                           添加多个账号后，网关将自动均衡分配请求。
                         </p>
@@ -1366,11 +1369,13 @@ export function GatewayPanel({
                                         <small>
                                           {account.provider === 'codex'
                                             ? 'Codex · 本地认证'
-                                            : account.provider === 'opencode-go'
-                                              ? 'OpenCode Go · 订阅'
-                                              : account.provider === 'deepseek'
-                                                ? 'DeepSeek · 按量付费'
-                                                : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
+                                            : account.provider === 'minimax'
+                                              ? `MiniMax · Token Plan · ${account.region === 'global' ? '国际区' : '中国区'}`
+                                              : account.provider === 'opencode-go'
+                                                ? 'OpenCode Go · 订阅'
+                                                : account.provider === 'deepseek'
+                                                  ? 'DeepSeek · 按量付费'
+                                                  : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
                                         </small>
                                       </div>
                                     </div>
@@ -2126,19 +2131,24 @@ function AccountEditor({
                 {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
                   <option value="kimi-local">Kimi Code · 本地登录态</option>
                 )}
+                <option value="minimax">MiniMax · Token Plan</option>
                 <option value="deepseek">DeepSeek · 按量付费</option>
                 <option value="opencode-go">OpenCode Go · 订阅</option>
               </select>
             </Field>
-            {(draft.provider ?? 'kimi') === 'kimi' && (
+            {((draft.provider ?? 'kimi') === 'kimi' || draft.provider === 'minimax') && (
               <Field label="账号区域">
                 <select
                   disabled={input.kind === 'oauth'}
                   value={draft.region}
                   onChange={(e) => change('region', e.target.value as AccountInput['region'])}
                 >
-                  <option value="mainland-cn">中国区 · kimi.com</option>
-                  <option value="global">国际区 · kimi.ai</option>
+                  <option value="mainland-cn">
+                    中国区 · {draft.provider === 'minimax' ? 'minimaxi.com' : 'kimi.com'}
+                  </option>
+                  <option value="global">
+                    国际区 · {draft.provider === 'minimax' ? 'minimax.io' : 'kimi.ai'}
+                  </option>
                 </select>
               </Field>
             )}
@@ -2148,11 +2158,13 @@ function AccountEditor({
                 hint={
                   input.id
                     ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
-                    : draft.provider === 'opencode-go'
-                      ? '填写已订阅 Go 的 OpenCode API Key。'
-                      : draft.provider === 'deepseek'
-                        ? '填写 DeepSeek 开放平台生成的密钥。'
-                        : '填写 Kimi Code 控制台生成的密钥。'
+                    : draft.provider === 'minimax'
+                      ? '填写 MiniMax Token Plan 的 Subscription Key（套餐密钥）。'
+                      : draft.provider === 'opencode-go'
+                        ? '填写已订阅 Go 的 OpenCode API Key。'
+                        : draft.provider === 'deepseek'
+                          ? '填写 DeepSeek 开放平台生成的密钥。'
+                          : '填写 Kimi Code 控制台生成的密钥。'
                 }
               >
                 <input
@@ -2659,6 +2671,7 @@ const providerNames = {
   codex: 'Codex',
   kimi: 'Kimi Code',
   deepseek: 'DeepSeek',
+  minimax: 'MiniMax',
   'opencode-go': 'OpenCode Go'
 }
 

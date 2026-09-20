@@ -284,7 +284,8 @@ test('dashboard source projects only safe data and preserves user account names'
     kimi: 'Kimi',
     deepseek: 'DeepSeek',
     'opencode-go': 'Go',
-    codex: 'Codex'
+    codex: 'Codex',
+    minimax: 'MiniMax'
   })) {
     account.provider = provider
     const mapped = await dashboardSource(gateway, usage)()

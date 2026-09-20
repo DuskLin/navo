@@ -84,6 +84,7 @@ export const PROVIDER_NAMES: Record<Provider, string> = {
   Kimi: 'Kimi Code',
   DeepSeek: '按量付费',
   Go: 'OpenCode Go',
+  MiniMax: 'Token Plan',
   Codex: 'OpenAI · Codex'
 }
 export const DASHBOARD_PROVIDERS = Object.keys(PROVIDER_NAMES) as Provider[]

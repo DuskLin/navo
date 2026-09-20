@@ -31,3 +31,24 @@ test('SSE 结束事件中的 request_id 可跨分块提取，不把 response.id 
   )
   assert.deepEqual(await observe(false, '{"id":"local","requestId":"invalid id"}'), [])
 })
+
+test('Chat finish_reason at clean EOF completes without DONE, including an unterminated final SSE frame', async () => {
+  for (const finish of ['stop', 'length', 'tool_calls', null, 'aborted']) {
+    const states: string[] = []
+    const observer = new ResponseIdsObserver(
+      true,
+      () => {},
+      'chat-completions',
+      undefined,
+      (s) => states.push(s)
+    )
+    observer.resume()
+    const end = once(observer, 'end')
+    observer.end(
+      'data: ' + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finish }] })
+    )
+    await end
+    assert.equal(states.includes('complete'), finish !== null && finish !== 'aborted')
+    assert.equal(states.includes('error'), finish === 'aborted')
+  }
+})

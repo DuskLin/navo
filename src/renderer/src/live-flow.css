@@ -1208,6 +1208,7 @@
   margin-top: 10px;
 }
 
-:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='openai'] {
+:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='openai'],
+:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='minimax'] {
   filter: invert(1);
 }

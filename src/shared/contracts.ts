@@ -74,7 +74,7 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
-export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex'] as const
+export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex', 'minimax'] as const
 export type Provider = (typeof PROVIDERS)[number]
 export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
@@ -156,11 +156,15 @@ export interface AccountBalance {
   balances: { currency: string; balance: number }[]
 }
 export function accountBaseUrl(region: Region, provider: Provider = 'kimi'): string {
+  if (provider === 'minimax')
+    return region === 'global' ? 'https://api.minimax.io/v1' : 'https://api.minimaxi.com/v1'
   if (provider === 'codex') return 'https://chatgpt.com/backend-api/codex'
   if (provider === 'opencode-go') return 'https://opencode.ai/zen/go/v1'
   return provider === 'deepseek' ? 'https://api.deepseek.com/v1' : kimiBaseUrl(region)
 }
 export function upstreamUrl(region: Region, provider: Provider = 'kimi', route: string): string {
+  if (provider === 'minimax' && route.startsWith('/v1/messages'))
+    return `${accountBaseUrl(region, provider).slice(0, -3)}/anthropic${route}`
   if (provider === 'deepseek' && route === '/v1/messages')
     return 'https://api.deepseek.com/anthropic/v1/messages'
   return `${accountBaseUrl(region, provider)}${route.slice(3)}`

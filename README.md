@@ -47,12 +47,13 @@ Navo 将多个供应商账号汇入本地账号池，通过 `127.0.0.1` 上的 H
 
 ## 支持的供应商
 
-| 供应商      | 账号类型                   | 同步信息                             |
-| ----------- | -------------------------- | ------------------------------------ |
-| Kimi Code   | 中国区／国际区 API Key 或本地 OAuth 登录 | 模型、5 小时／7 天额度、并发上限     |
-| DeepSeek    | 开放平台 API Key，按量付费 | 模型、各币种余额（分别显示，不换算） |
-| OpenCode Go | 已订阅 Go 的 API Key       | 模型、5 小时／周／月额度窗口         |
-| Codex       | 本地 ChatGPT OAuth 登录    | 可用模型、剩余额度及重置时间、认证自动刷新 |
+| 供应商      | 账号类型                                      | 同步信息                                   |
+| ----------- | --------------------------------------------- | ------------------------------------------ |
+| Kimi Code   | 中国区／国际区 API Key 或本地 OAuth 登录      | 模型、5 小时／7 天额度、并发上限           |
+| DeepSeek    | 开放平台 API Key，按量付费                    | 模型、各币种余额（分别显示，不换算）       |
+| MiniMax     | Token Plan Subscription Key（中国区／国际区） | 模型、5 小时／周剩余额度及重置时间         |
+| OpenCode Go | 已订阅 Go 的 API Key                          | 模型、5 小时／周／月额度窗口               |
+| Codex       | 本地 ChatGPT OAuth 登录                       | 可用模型、剩余额度及重置时间、认证自动刷新 |
 
 上游地址由应用固定，模型列表由上游同步。OpenCode Zen 按量付费账号不在当前接入范围。协议最终可用性取决于供应商和模型；在界面中勾选协议不会让上游新增能力。
 
@@ -86,6 +87,14 @@ npm run dev
 所有供应商账号均支持在「编辑账号 → 可用模型 → 手动添加模型」中填写模型 ID（例如 `gpt-6-astra`）。点击「添加模型」，确认上游协议后保存账号，即可通过网关调用。Codex 固定使用 Responses，其他入口由网关转换。
 
 手动模型会标注「手动」，并在同步上游、重启和重新导入 Codex 认证后保留；删除仅对当前账号生效，也可通过「恢复已删除模型」恢复。手动添加不代表上游已验证该模型可用，实际调用仍取决于账号权限。
+
+### 添加 MiniMax Token Plan
+
+在「设置 → 账号管理 → 添加账号」选择「MiniMax · Token Plan」，选择套餐所属中国区或国际区，填写 Subscription Key。保存后同步模型列表、5 小时与周剩余额度；周窗口仅在上游启用时展示，额度耗尽的账号暂停参与调度。
+
+额度读取参考 sub2api 的 `coding_plan/remains` 实现，只使用 `general` 套餐的剩余百分比，不混入视频额度。Messages 请求转发至 `/anthropic/v1/messages`，Responses 和 Chat Completions 使用 `/v1` 下的对应端点。
+
+MiniMax M 系列在转发 Messages / Chat Completions 前，参考 sub2api 将 SDK 的 `thinking.type=enabled` 适配为 `adaptive`，保留显式思考等级、预算和历史思考内容。转换到 Messages 时，低等级思考也会显式开启，`none` 映射为 `disabled`。上游对等级的实际解释以其 API 为准。Chat Completions 默认开启 `reasoning_split`，将思考内容与正文分离（保留客户端显式设置）。流在正常 EOF 前返回有效 `finish_reason` 时即视为完成，不要求额外 `[DONE]`；缺少完成标记的断流仍会记录为失败。
 
 ### 导入本地 Kimi 登录态
 

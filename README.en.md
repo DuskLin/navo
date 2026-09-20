@@ -51,6 +51,7 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 | ----------- | -------------------------------------------- | ------------------------------------------------------------- |
 | Kimi Code   | China / international API key or local OAuth | Models, 5-hour / 7-day quotas, concurrency limit              |
 | DeepSeek    | Platform API key, pay as you go              | Models and balances per currency, without currency conversion |
+| MiniMax     | Token Plan Subscription Key (China / Global) | Models, 5-hour / weekly remaining quota and reset times       |
 | Codex       | Local ChatGPT OAuth login | Models, remaining quota and reset times, automatic token refresh |
 | OpenCode Go | API key with an active Go subscription       | Models and 5-hour / weekly / monthly quota windows            |
 

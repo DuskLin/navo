@@ -115,6 +115,29 @@ const upstream = createServer((req, res) => {
     )
     return
   }
+  if (req.headers.authorization === 'Bearer smoke-minimax-key') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify(
+        req.url === '/v1/models'
+          ? { data: [{ id: 'MiniMax-M3' }] }
+          : {
+              base_resp: { status_code: 0 },
+              model_remains: [
+                {
+                  model_name: 'general',
+                  current_interval_remaining_percent: 72,
+                  end_time: fiveHourReset,
+                  current_weekly_status: 1,
+                  current_weekly_remaining_percent: 64,
+                  weekly_end_time: weeklyReset
+                }
+              ]
+            }
+      )
+    )
+    return
+  }
   if (req.url === '/v1/models' || req.url === '/user/balance') {
     assert.equal(req.headers.authorization, 'Bearer smoke-deepseek-key')
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -206,7 +229,7 @@ await writeFile(
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
-    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai', 'models.dev', 'chatgpt.com'].includes(url.hostname)) {
+    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'api.minimaxi.com', 'api.minimax.io', 'opencode.ai', 'models.dev', 'chatgpt.com'].includes(url.hostname)) {
       return realFetch('http://127.0.0.1:${upstreamPort}' + url.pathname + url.search, init);
     }
     return realFetch(input, init);
@@ -1145,6 +1168,33 @@ try {
   await page.screenshot({ path: join(artifacts, 'deepseek-overview.png') })
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
+  await page.getByRole('button', { name: '添加账号', exact: true }).click()
+  await page.getByLabel('供应商', { exact: true }).selectOption('minimax')
+  await page.getByLabel('账号名称', { exact: true }).fill('MiniMax 测试账号')
+  assert.equal(
+    await page.getByLabel('上游 Base URL', { exact: true }).inputValue(),
+    'https://api.minimaxi.com/v1'
+  )
+  await page.getByLabel('账号区域', { exact: true }).selectOption('global')
+  assert.equal(
+    await page.getByLabel('上游 Base URL', { exact: true }).inputValue(),
+    'https://api.minimax.io/v1'
+  )
+  await page.getByLabel('API Key', { exact: true }).fill('smoke-minimax-key')
+  await page.getByLabel('API Key', { exact: true }).press('Tab')
+  await page
+    .getByRole('table', { name: '可用模型' })
+    .getByText('MiniMax-M3', { exact: true })
+    .waitFor()
+  await page.screenshot({ path: join(artifacts, 'minimax-editor.png') })
+  await page.getByRole('button', { name: '保存账号', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  const minimaxAccount = await page.evaluate(async () =>
+    (await window.navo.getGateway()).accounts.find((account) => account.provider === 'minimax')
+  )
+  assert.equal(minimaxAccount.region, 'global')
+  assert.equal(minimaxAccount.capabilities.quota.fiveHour.remaining, 72)
+  assert.equal(minimaxAccount.capabilities.quota.weekly.remaining, 64)
   await page.getByRole('button', { name: '添加账号', exact: true }).click()
   await page.getByLabel('供应商', { exact: true }).selectOption('opencode-go')
   assert.equal(await page.getByLabel('账号区域', { exact: true }).count(), 0)

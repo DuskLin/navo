@@ -1050,3 +1050,28 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('MiniMax finish_reason without DONE converts at clean EOF and retains trailing usage', async () => {
+  const body =
+    sse({ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] }) +
+    sse({ choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: 'stop' }] }) +
+    sse({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } })
+  for (const target of ['messages', 'responses'] as const) {
+    const output = await translate('chat-completions', target, true, true, body)
+    assert.ok(output.includes(target === 'messages' ? 'message_stop' : 'response.completed'))
+    assert.ok(output.includes('thinking'))
+    assert.ok(output.includes('OK'))
+    const result = JSON.parse(await translate('chat-completions', target, true, false, body))
+    assert.equal(result.usage.output_tokens, 2)
+    await assert.rejects(
+      translate(
+        'chat-completions',
+        target,
+        true,
+        true,
+        sse({ choices: [{ index: 0, delta: { content: 'partial' }, finish_reason: null }] })
+      ),
+      /结束事件/
+    )
+  }
+})

@@ -496,7 +496,8 @@ td small {
   font-weight: 700;
   flex-shrink: 0;
 }
-.deepseek-logo {
+.deepseek-logo,
+.minimax-logo {
   display: block;
   width: 24px;
   height: 24px;
@@ -508,7 +509,9 @@ td small {
 :root[data-theme='dark'] .opencode-go-logo {
   color: #fff;
 }
-:root[data-theme='dark'] .deepseek-logo {
+:root[data-theme='dark'] .deepseek-logo,
+:root[data-theme='dark'] .minimax-logo,
+:root[data-theme='dark'] img.model-logo[data-brand='minimax'] {
   filter: brightness(0) invert(1);
 }
 .kimi-logo {

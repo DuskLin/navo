@@ -8,6 +8,7 @@ const providerLabels: Record<Provider, DashboardAccount['provider']> = {
   kimi: 'Kimi',
   deepseek: 'DeepSeek',
   'opencode-go': 'Go',
+  minimax: 'MiniMax',
   codex: 'Codex'
 }
 

@@ -2593,3 +2593,206 @@ test('failed model tests persist partial usage and contribute to account quota a
     await f.cleanup()
   }
 })
+
+test('MiniMax Token Plan persists, routes all protocols and stops scheduling exhausted quotas', async () => {
+  const f = await storeFixture()
+  let remaining = 70
+  const calls: string[] = []
+  const gateway = f.createGateway(
+    async (url, init) => {
+      calls.push(String(url))
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret-minimax')
+      return Response.json({ ok: true })
+    },
+    async (url) =>
+      String(url).endsWith('/models')
+        ? Response.json({ data: [{ id: 'MiniMax-M3' }] })
+        : Response.json({
+            model_remains: [
+              { model_name: 'general', current_interval_remaining_percent: remaining }
+            ]
+          })
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({ ...accountInput('minimax'), provider: 'minimax' })
+    const account = f.store.get().accounts[0]
+    assert.equal(account.baseUrl, 'https://api.minimaxi.com/v1')
+    const loaded = new GatewayStore(f.file, f.secrets)
+    await loaded.load()
+    assert.deepEqual(loaded.get().accounts, f.store.get().accounts)
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const post = (route: string) =>
+      fetch(`http://127.0.0.1:${reserved.port}${route}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${f.store.get().groups[0].key}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'MiniMax-M3',
+          messages: [{ role: 'user', content: 'hi' }],
+          input: 'hi',
+          max_tokens: 10
+        })
+      })
+    for (const route of ['/v1/messages', '/v1/responses', '/v1/chat/completions']) {
+      const response = await post(route)
+      assert.equal(response.status, 200)
+      await response.text()
+      assert.equal(
+        calls.at(-1),
+        `https://api.minimaxi.com${route === '/v1/messages' ? '/anthropic' : ''}${route}`
+      )
+    }
+    remaining = 0
+    await gateway.refreshAccount(account.id)
+    const exhausted = await post('/v1/messages')
+    assert.equal(exhausted.status, 503)
+    await exhausted.text()
+    assert.equal(calls.length, 3)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('MiniMax forwarding normalizes native and converted thinking before sending upstream', async () => {
+  const f = await storeFixture()
+  const calls: { url: string; body: Record<string, any> }[] = []
+  const gateway = f.createGateway(
+    async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(Buffer.from(init?.body as Uint8Array).toString())
+      })
+      return Response.json({
+        id: 'msg_minimax',
+        type: 'message',
+        role: 'assistant',
+        model: 'MiniMax-M3',
+        content: [{ type: 'text', text: 'OK' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 }
+      })
+    },
+    async (url) =>
+      Response.json(
+        String(url).endsWith('/models')
+          ? { data: [{ id: 'MiniMax-M3' }] }
+          : { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 80 }] }
+      )
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({
+      ...accountInput('minimax'),
+      provider: 'minimax',
+      modelProtocols: { 'MiniMax-M3': ['messages'] }
+    })
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    for (const [route, fields] of [
+      [
+        '/v1/messages',
+        {
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { type: 'enabled', budget_tokens: 4096 },
+          output_config: { effort: 'high' }
+        }
+      ],
+      ['/v1/responses', { input: 'hi', reasoning: { effort: 'low' } }],
+      [
+        '/v1/chat/completions',
+        { messages: [{ role: 'user', content: 'hi' }], reasoning_effort: 'high' }
+      ],
+      [
+        '/v1/messages',
+        { messages: [{ role: 'user', content: 'hi' }], thinking: { type: 'disabled' } }
+      ]
+    ] as const) {
+      const result = await fetch(`http://127.0.0.1:${reserved.port}${route}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${f.store.get().groups[0].key}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ model: 'MiniMax-M3', max_tokens: 8192, ...fields })
+      })
+      assert.equal(result.status, 200)
+      await result.text()
+      assert.equal(calls.at(-1)!.url, 'https://api.minimaxi.com/anthropic/v1/messages')
+    }
+    assert.deepEqual(
+      calls.map((c) => c.body.thinking.type),
+      ['adaptive', 'adaptive', 'adaptive', 'disabled']
+    )
+    assert.equal(calls[0].body.thinking.budget_tokens, 4096)
+    assert.deepEqual(
+      calls.slice(0, 3).map((c) => c.body.output_config.effort),
+      ['high', 'low', 'high']
+    )
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('MiniMax clean EOF keeps successful requests schedulable and requests separated reasoning', async () => {
+  const f = await storeFixture()
+  const events =
+    'data: ' +
+    JSON.stringify({
+      choices: [{ index: 0, delta: { reasoning_content: 'reasoning' }, finish_reason: '' }]
+    }) +
+    '\n\n' +
+    'data: ' +
+    JSON.stringify({
+      choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 2 }
+    }) +
+    '\n\n'
+  const gateway = f.createGateway(
+    async (_url, init) => {
+      const body = JSON.parse(Buffer.from(init?.body as Uint8Array).toString())
+      assert.equal(body.reasoning_split, true)
+      return new Response(events, { headers: { 'content-type': 'text/event-stream' } })
+    },
+    async (url) =>
+      Response.json(
+        String(url).endsWith('/models')
+          ? { data: [{ id: 'MiniMax-M3' }] }
+          : { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 80 }] }
+      )
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({ ...accountInput('minimax'), provider: 'minimax' })
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(`http://127.0.0.1:${reserved.port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${f.store.get().groups[0].key}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'MiniMax-M3',
+          messages: [{ role: 'user', content: 'hi' }],
+          stream: true
+        })
+      })
+      assert.equal(response.status, 200)
+      assert.equal(await response.text(), events)
+      await eventually(() => gateway.snapshot().requests.length === attempt + 1)
+      assert.equal(gateway.snapshot().requests[0].status, 200)
+      assert.equal(gateway.snapshot().requests[0].interruption, null)
+      assert.equal(gateway.scheduler.state(f.store.get().accounts[0].id).cooldownUntil, 0)
+    }
+  } finally {
+    await f.cleanup()
+  }
+})

@@ -36,6 +36,7 @@ import {
 } from './data'
 import logo from '../assets/navo-logo.png'
 import kimi from '../assets/kimi.svg'
+import minimax from '../assets/models/minimax.svg'
 import deepseek from '../assets/deepseek.svg'
 import openai from '../assets/models/openai.svg'
 import go from '../assets/models/opencode.svg'
@@ -60,7 +61,7 @@ function Identity({ account }: { account: DashboardAccount }) {
       <span className={`provider-logo ${account.provider.toLowerCase()}`}>
         <img
           src={
-            { Kimi: kimi, DeepSeek: deepseek, Go: go, Codex: openai }[
+            { Kimi: kimi, DeepSeek: deepseek, Go: go, MiniMax: minimax, Codex: openai }[
               account.provider
             ]
           }

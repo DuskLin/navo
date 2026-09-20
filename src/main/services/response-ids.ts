@@ -14,6 +14,7 @@ export class ResponseIdsObserver extends Transform {
   private event = ''
   private size = 0
   private disabled = false
+  private chatChoices = new Map<number, boolean>()
   constructor(
     private readonly streaming: boolean,
     private readonly onId: (id: string) => void,
@@ -41,6 +42,20 @@ export class ResponseIdsObserver extends Transform {
           )
         )
           this.onStreamState?.('complete')
+      }
+      if (this.streaming && this.protocol === 'chat-completions' && Array.isArray(root?.choices)) {
+        for (const choice of root.choices) {
+          const index = choice.index ?? 0
+          if (!Number.isInteger(index) || index < 0) continue
+          const finished = [
+            'stop',
+            'length',
+            'tool_calls',
+            'function_call',
+            'content_filter'
+          ].includes(choice.finish_reason)
+          this.chatChoices.set(index, finished || this.chatChoices.get(index) === true)
+        }
       }
       if (this.protocol && this.onUsage) {
         const usage = parseUsage(root, this.protocol)
@@ -89,7 +104,18 @@ export class ResponseIdsObserver extends Transform {
     callback(null, chunk)
   }
   override _flush(callback: TransformCallback): void {
-    if (!this.streaming && !this.disabled) this.inspect(this.pending + this.decoder.end())
+    if (!this.disabled) {
+      const tail = this.pending + this.decoder.end()
+      if (!this.streaming) this.inspect(tail)
+      else {
+        if (tail.startsWith('data:'))
+          this.data.push(tail.slice(5).replace(/^ /, '').replace(/\r$/, ''))
+        if (this.data.length) this.inspect(this.data.join('\n'))
+        // Some OpenAI-compatible providers end cleanly after finish_reason, without [DONE].
+        if (this.chatChoices.size && [...this.chatChoices.values()].every(Boolean))
+          this.onStreamState?.('complete')
+      }
+    }
     callback()
   }
 }

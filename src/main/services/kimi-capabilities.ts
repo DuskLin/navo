@@ -9,6 +9,7 @@ import {
 import { object, string } from './gateway-store'
 import { parseKimiQuota } from '../../shared/kimi-quota'
 import { parseDeepSeekBalance } from '../../shared/deepseek-balance'
+import { MiniMaxQuotaError, parseMiniMaxQuota } from '../../shared/minimax'
 import { parseOpenCodeGoQuota } from '../../shared/opencode-go'
 
 export class CapabilityError extends Error {
@@ -183,7 +184,9 @@ export class KimiCapabilities {
       const usage = await this.read(
         provider === 'deepseek'
           ? 'https://api.deepseek.com/user/balance'
-          : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
+          : provider === 'minimax'
+            ? `${base}/api/openplatform/coding_plan/remains`
+            : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
         key,
         signal,
         provider === 'deepseek' ? '余额' : '额度与并发信息',
@@ -194,13 +197,18 @@ export class KimiCapabilities {
       if (provider === 'deepseek') balance = parseDeepSeekBalance(usage.data)
       else {
         quota =
-          provider === 'opencode-go' ? parseOpenCodeGoQuota(usage.data) : parseKimiQuota(usage.data)
+          provider === 'minimax'
+            ? parseMiniMaxQuota(usage.data)
+            : provider === 'opencode-go'
+              ? parseOpenCodeGoQuota(usage.data)
+              : parseKimiQuota(usage.data)
         if (!quota) warning = '上游未返回额度数据'
       }
     } catch (error) {
-      // Go 的模型目录是公开的，必须让用量接口的鉴权失败阻止保存无效密钥。
+      // 套餐接口的业务错误及鉴权失败必须阻止保存无效密钥。
+      if (error instanceof MiniMaxQuotaError) throw error
       if (
-        provider === 'opencode-go' &&
+        (provider === 'opencode-go' || provider === 'minimax') &&
         error instanceof CapabilityError &&
         (error.status === 401 || error.status === 403)
       )

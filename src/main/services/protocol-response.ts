@@ -631,7 +631,16 @@ class ResponseBridge {
             (pending?.arguments ?? '') + str(fn.arguments)
           )
         }
-        if (choice.finish_reason) this.reason = choice.finish_reason
+        if (choice.finish_reason) {
+          this.reason = choice.finish_reason
+          this.chatFinished = [
+            'stop',
+            'length',
+            'tool_calls',
+            'function_call',
+            'content_filter'
+          ].includes(choice.finish_reason)
+        }
       }
     } else if (source === 'messages') {
       if (type === 'message_start') this.start()
@@ -752,6 +761,10 @@ class ResponseBridge {
       }
     }
   }
+  end(source: UsageProtocol): void {
+    if (source === 'chat-completions' && this.chatFinished) this.finish()
+  }
+  private chatFinished = false
   done(source: UsageProtocol): void {
     if (source === 'chat-completions') this.finish()
     else if (!this.finished) throw badResponse()
@@ -942,6 +955,8 @@ export async function* convertResponse(
     dispatch()
     yield* bridge.drain()
   }
+  bridge.end(options.source)
+  yield* bridge.drain()
   if (!bridge.finished) throw badResponse()
   if (!options.outputStream) yield Buffer.from(JSON.stringify(nativeResponse ?? bridge.json()))
 }
