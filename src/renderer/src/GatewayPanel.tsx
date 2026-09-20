@@ -1541,7 +1541,7 @@ export function GatewayPanel({
                       <div>
                         <h2>请求记录</h2>
                         <p className="muted">
-                          永久保存在本机，每页 10 条；不记录提示词、回复或密钥。
+                          仅在本机保留最近 90 天的记录，每页 10 条；不记录提示词、回复或密钥。
                         </p>
                       </div>
                       <span className="badge">
@@ -1565,7 +1565,7 @@ export function GatewayPanel({
                           <thead>
                             <tr>
                               <th>时间</th>
-                              <th>账号 / Request ID</th>
+                              <th>账号</th>
                               <th>模型</th>
                               <th>协议转换</th>
                               <th title="客户端请求中指定的思考强度；未指定或旧记录显示 —">
@@ -1587,11 +1587,6 @@ export function GatewayPanel({
                                   {r.account || '未分配'}
                                   {r.group === '模型测试' && (
                                     <span className="badge">模型测试</span>
-                                  )}
-                                  {r.upstreamRequestId && (
-                                    <small className="request-id" title={r.upstreamRequestId}>
-                                      requestId: {r.upstreamRequestId}
-                                    </small>
                                   )}
                                 </td>
                                 <td className="model-cell">{r.model || '模型列表'}</td>

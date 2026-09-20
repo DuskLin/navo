@@ -443,12 +443,6 @@ tbody tr:last-child td {
   line-height: 18px;
   white-space: nowrap;
 }
-.request-id {
-  max-width: 320px;
-  overflow-wrap: anywhere;
-  user-select: text;
-  font-family: ui-monospace, monospace;
-}
 .latency-label {
   color: var(--muted);
 }

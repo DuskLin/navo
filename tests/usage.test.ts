@@ -75,7 +75,8 @@ test('OpenAI 缓存包含在输入中，Anthropic 独立计数；保留零与未
   assert.equal(parseUsage({ choices: [] }, 'chat-completions'), null)
 })
 
-test('流式开始与结束用量合并，重复累计输出不重复累加，字节透传不变', async () => {
+test('流式开始与结束用量合并，重复累计输出不重复累加，字节透传不变', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   let usage: TokenUsage = {
     input: null,
     output: null,
@@ -118,7 +119,8 @@ test('流式开始与结束用量合并，重复累计输出不重复累加，�
   assert.deepEqual(usage, { input: 20, output: 30, cacheRead: 80, cacheWrite: 0, cost: null })
 })
 
-test('用量按完整历史汇总、筛选和时间分桶，重启保留，未知费用不计为零', async () => {
+test('用量按完整历史汇总、筛选和时间分桶，重启保留，未知费用不计为零', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-stats-'))
   const file = join(dir, 'history.sqlite')
   let history = new RequestHistory(file)
@@ -179,7 +181,8 @@ test('用量按完整历史汇总、筛选和时间分桶，重启保留，未�
   }
 })
 
-test('平均速度按有效流式时长加权，中断数量和已报告消耗单独汇总', async () => {
+test('平均速度按有效流式时长加权，中断数量和已报告消耗单独汇总', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-performance-'))
   const history = new RequestHistory(join(dir, 'history.sqlite'))
   const start = new Date(2026, 8, 16).getTime()
@@ -308,7 +311,8 @@ test('平均速度按有效流式时长加权，中断数量和已报告消耗�
   }
 })
 
-test('按账号和模型平均首 token，保留零值并排除未知、失败和中断', async () => {
+test('按账号和模型平均首 token，保留零值并排除未知、失败和中断', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-first-token-stats-'))
   const file = join(dir, 'history.sqlite')
   let history = new RequestHistory(file)
@@ -365,7 +369,8 @@ test('按账号和模型平均首 token，保留零值并排除未知、失败�
   }
 })
 
-test('北京时间工作日峰谷边界、周末和分时性能统计', async () => {
+test('北京时间工作日峰谷边界、周末和分时性能统计', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-period-stats-'))
   const history = new RequestHistory(join(dir, 'history.sqlite'))
   const base = {
@@ -454,8 +459,10 @@ test('北京时间工作日峰谷边界、周末和分时性能统计', async ()
   }
 })
 
-test('热力图默认最近十二个月并支持完整历史，日期边界与未知用量分级正确', async () => {
+test('热力图默认最近十二个月并支持完整历史，日期边界与未知用量分级正确', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const now = new Date(2026, 0, 2, 13).getTime()
+  t.mock.method(Date, 'now', () => now)
   const range = heatmapRange(now)
   const dates: string[] = []
   for (
@@ -494,17 +501,21 @@ test('热力图默认最近十二个月并支持完整历史，日期边界与�
     assert.equal(result.points.at(-1)!.totalTokens, null)
     history.append({ ...record, id: 'older', time: new Date(2023, 0, 15).getTime() })
     const full = history.usage({ ...range, bucketMs: 86400000, allHistory: true })
-    assert.equal(localDayKey(full.points[0].time), '2023-01-01')
-    assert.ok(full.points.length > 366)
-    assert.equal(full.summary.requests, 3)
-    assert.equal(full.points.find((point) => localDayKey(point.time) === '2023-01-15')?.requests, 1)
+    assert.equal(localDayKey(full.points[0].time), '2025-02-01')
+    assert.equal(full.points.length, dates.length)
+    assert.equal(full.summary.requests, 2)
+    assert.equal(
+      full.points.find((point) => localDayKey(point.time) === '2023-01-15')?.requests,
+      undefined
+    )
   } finally {
     history.close()
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-test('usage costs apply current pricing consistently to totals, daily buckets and model details', async () => {
+test('usage costs apply current pricing consistently to totals, daily buckets and model details', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'usage-prices-'))
   const history = new RequestHistory(join(dir, 'history.sqlite'))
   try {

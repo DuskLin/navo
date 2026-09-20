@@ -7,13 +7,14 @@ import { join } from 'node:path'
 import { performanceHistoryRange } from '../src/shared/usage'
 import { RequestHistory } from '../src/main/services/request-history'
 
-test('quota usage reads complete account history within cycle boundaries and invalidates cache', async () => {
+test('quota usage reads complete account history within cycle boundaries and invalidates cache', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-quota-history-'))
   const history = new RequestHistory(join(dir, 'requests.sqlite'))
   try {
     const record = {
       id: 'base',
-      time: 10,
+      time: Date.now() - 1000 + 10,
       accountId: 'a',
       group: '',
       account: 'same name',
@@ -23,27 +24,29 @@ test('quota usage reads complete account history within cycle boundaries and inv
       durationMs: 1,
       firstTokenMs: null
     }
-    for (let i = 0; i < 20; i++) history.append({ ...record, id: String(i), time: i })
+    for (let i = 0; i < 20; i++)
+      history.append({ ...record, id: String(i), time: Date.now() - 1000 + i })
     history.append({ ...record, id: 'other', accountId: 'b' })
-    assert.equal(history.quotaUsage('a', 5, 19).length, 15)
-    assert.equal(history.quotaUsage('b', 5, 19).length, 1)
+    assert.equal(history.quotaUsage('a', Date.now() - 995, Date.now() - 981).length, 15)
+    assert.equal(history.quotaUsage('b', Date.now() - 995, Date.now() - 981).length, 1)
     history.append({ ...record, id: 'late' })
-    assert.equal(history.quotaUsage('a', 5, 19).length, 16)
-    assert.equal(history.quotaUsage('a', 19, 20).length, 1)
+    assert.equal(history.quotaUsage('a', Date.now() - 995, Date.now() - 981).length, 16)
+    assert.equal(history.quotaUsage('a', Date.now() - 981, Date.now() - 980).length, 1)
   } finally {
     history.close()
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-test('请求记录永久落盘超过 100 条，重启可分页读取且新请求不打乱旧页游标', async () => {
+test('请求记录落盘超过 100 条，重启可分页读取且新请求不打乱旧页游标', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-history-'))
   let history = new RequestHistory(join(dir, 'requests.sqlite'))
   try {
     for (let i = 0; i < 137; i++)
       history.append({
         id: String(i),
-        time: i,
+        time: Date.now() - 1000 + i,
         group: '',
         account: 'account',
         model: 'k3',
@@ -79,7 +82,8 @@ test('请求记录永久落盘超过 100 条，重启可分页读取且新请求
   }
 })
 
-test('quota averages persist one latest valid sample per account, window and cycle', async () => {
+test('quota averages persist one latest valid sample per account, window and cycle', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-quota-averages-'))
   const file = join(dir, 'requests.sqlite')
   let history = new RequestHistory(file)
@@ -129,7 +133,8 @@ test('quota averages persist one latest valid sample per account, window and cyc
   }
 })
 
-test('cycle exclusions migrate old databases, survive refresh and restart, and restore averages', async () => {
+test('cycle exclusions migrate old databases, survive refresh and restart, and restore averages', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-cycle-exclusions-'))
   const file = join(dir, 'requests.sqlite')
   const old = new DatabaseSync(file)
@@ -178,7 +183,8 @@ test('cycle exclusions migrate old databases, survive refresh and restart, and r
   }
 })
 
-test('daily performance uses Beijing calendar days and keeps metrics and accounts separate', async () => {
+test('daily performance uses Beijing calendar days and keeps metrics and accounts separate', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-daily-performance-'))
   const history = new RequestHistory(join(dir, 'requests.sqlite'))
   try {
@@ -232,6 +238,60 @@ test('daily performance uses Beijing calendar days and keeps metrics and account
     assert.ok(rows.every((r) => r.firstTokenSamples === 1 && r.speedSamples === 1))
     assert.equal(history.usage(query).byAccount.length, 2)
     assert.ok(history.usage(query).byAccount.every((r) => r.day === undefined))
+  } finally {
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('retention removes expired persisted records on startup, append, page and idle cleanup', async (t) => {
+  let now = Date.parse('2026-09-20T00:00:00Z')
+  t.mock.method(Date, 'now', () => now)
+  t.mock.timers.enable({ apis: ['setInterval'] })
+  const dir = await mkdtemp(join(tmpdir(), 'navo-retention-'))
+  const file = join(dir, 'requests.sqlite')
+  let history = new RequestHistory(file)
+  const cutoff = now - 90 * 86400000
+  const base = {
+    id: 'boundary',
+    time: cutoff,
+    accountId: 'a',
+    account: 'A',
+    group: '',
+    model: 'm',
+    status: 200,
+    attempts: 1,
+    durationMs: 1,
+    firstTokenMs: null
+  }
+  try {
+    history.append(base)
+    history.append({ ...base, id: 'recent', time: now })
+    history.close()
+    const seed = new DatabaseSync(file)
+    seed
+      .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
+      .run('expired', JSON.stringify({ ...base, id: 'expired', time: cutoff - 1 }))
+    seed.close()
+    history = new RequestHistory(file)
+    assert.equal(history.page().total, 2)
+    assert.equal(history.quotaUsage('a', 0, now).length, 2)
+    now += 1
+    history.append({ ...base, id: 'too-old', time: cutoff - 1 })
+    assert.equal(history.page().total, 1)
+    assert.equal(history.quotaUsage('a', 0, now - 1).length, 1)
+    history.append({ ...base, id: 'page-boundary', time: now - 90 * 86400000 })
+    now += 1
+    assert.equal(history.page().total, 1)
+    history.append({ ...base, id: 'idle-boundary', time: now - 90 * 86400000 })
+    now += 1
+    t.mock.timers.tick(60 * 60 * 1000)
+    const reader = new DatabaseSync(file, { readOnly: true })
+    try {
+      assert.equal(reader.prepare('SELECT COUNT(*) AS total FROM requests').get()!.total, 1)
+    } finally {
+      reader.close()
+    }
   } finally {
     history.close()
     await rm(dir, { recursive: true, force: true })

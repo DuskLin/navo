@@ -9,9 +9,10 @@ import { RequestHistory } from '../src/main/services/request-history'
 import { UsageService } from '../src/main/services/usage-service'
 import type { RequestPricing } from '../src/shared/request-cost'
 
+const start = new Date().setHours(0, 0, 0, 0)
 const record = {
   id: 'a',
-  time: 1000,
+  time: start + 1000,
   group: '',
   account: 'account',
   accountId: 'a',
@@ -23,7 +24,7 @@ const record = {
   firstTokenMs: 10,
   usage: { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, cost: null }
 }
-const query = { start: 0, end: 86400000, bucketMs: 86400000 }
+const query = { start, end: start + 86400000, bucketMs: 86400000 }
 const pricing: RequestPricing = {
   accounts: [{ id: 'a', provider: 'kimi' }],
   modelPrices: [],
@@ -85,7 +86,7 @@ test('large worker scans leave HTTP responsive and pending queries can be cancel
       seed.exec('BEGIN')
       const insert = seed.prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
       for (let i = 0; i < 20000; i++)
-        insert.run(String(i), JSON.stringify({ ...record, id: String(i), time: i }))
+        insert.run(String(i), JSON.stringify({ ...record, id: String(i), time: start + i }))
       seed.exec('COMMIT')
     } finally {
       seed.close()

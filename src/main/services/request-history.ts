@@ -20,8 +20,11 @@ function cycleQuery(value: unknown): QuotaCycleQuery {
   return query
 }
 
-/** 永久保存请求摘要；按游标分页，避免将全部历史加载进内存。 */
+const REQUEST_RETENTION_MS = 90 * 86400000
+
+/** 仅保留最近 90 天的请求摘要；按游标分页，避免将全部历史加载进内存。 */
 export class RequestHistory {
+  private cleanupTimer?: ReturnType<typeof setInterval>
   private db: DatabaseSync
   private quotaRecords = new Map<string, { start: number; end: number; records: RequestRecord[] }>()
   constructor(file: string, readOnly = false) {
@@ -61,8 +64,19 @@ export class RequestHistory {
         .some((row) => row.name === 'excluded')
     )
       this.db.exec('ALTER TABLE quota_cost_cycles ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0')
+    this.prune()
+    this.cleanupTimer = setInterval(() => this.prune(), 60 * 60 * 1000)
+    this.cleanupTimer.unref()
+  }
+  private prune(): void {
+    const result = this.db
+      .prepare("DELETE FROM requests WHERE json_extract(record, '$.time') < ?")
+      .run(Date.now() - REQUEST_RETENTION_MS)
+    if (result.changes) this.quotaRecords.clear()
   }
   append(record: RequestRecord): void {
+    this.prune()
+    if (record.time < Date.now() - REQUEST_RETENTION_MS) return
     this.db
       .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
       .run(record.id, JSON.stringify(record))
@@ -173,6 +187,7 @@ export class RequestHistory {
   page(before?: number): RequestHistoryPage {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
       throw new Error('请求记录游标无效')
+    if (this.cleanupTimer) this.prune()
     const rows = (
       before === undefined
         ? this.db.prepare('SELECT seq, record FROM requests ORDER BY seq DESC LIMIT 11').all()
@@ -188,6 +203,7 @@ export class RequestHistory {
     }
   }
   close(): void {
+    clearInterval(this.cleanupTimer)
     this.db.close()
   }
   get dataVersion(): number {
