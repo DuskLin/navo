@@ -1,3 +1,4 @@
+import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
 import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
@@ -843,6 +844,15 @@ export class Gateway {
             const value = upstream.headers.get(name)
             if (value) outgoing[name] = value
           }
+          const inspected = upstream.body
+            ? await inspectUpstreamBody(upstream.body, upstream.headers.get('content-type'))
+            : undefined
+          if (
+            inspected?.streaming &&
+            upstream.ok &&
+            !/text\/event-stream/i.test(upstream.headers.get('content-type') ?? '')
+          )
+            outgoing['content-type'] = 'text/event-stream; charset=utf-8'
           if (converted)
             outgoing['content-type'] =
               upstream.ok && payload.stream === true
@@ -854,8 +864,8 @@ export class Gateway {
             res.flushHeaders()
           }
           // 同协议透传；跨协议在背压管线中转换。开始输出后不再重试。
-          if (upstream.body) {
-            const source = Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0])
+          if (inspected) {
+            const { source, streaming } = inspected
             // pipeline 会销毁下游；先标记上游故障，避免将它误判为用户主动取消。
             source.once('error', () => {
               if (!controller.signal.aborted) {
@@ -863,7 +873,6 @@ export class Gateway {
                 interruption ??= 'upstream_disconnect'
               }
             })
-            const streaming = !!upstream.headers.get('content-type')?.includes('text/event-stream')
             let streamComplete = false
             let streamInspectable = true
             if (upstream.ok && streaming) streamStartedAt = attemptStartedTick

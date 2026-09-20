@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream'
+import { inspectUpstreamBody } from './upstream-body'
 import { pipeline } from 'node:stream/promises'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import { FirstTokenObserver } from './first-token'
@@ -97,45 +97,11 @@ export async function testAccountModel(
     }
     if (!response.body) throw new Error(`HTTP ${response.status}：上游未返回响应内容`)
     const receivedAt = performance.now()
-    // Some upstreams send SSE with a missing or incorrect Content-Type. Inspect a
-    // bounded prefix before constructing observers so usage and timing use the same format.
-    const source = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
-    const iterator = source[Symbol.asyncIterator]()
-    const prefix: Buffer[] = []
-    let prefixSize = 0
-    let streaming = /text\/event-stream/i.test(response.headers.get('content-type') ?? '')
-    try {
-      while (prefixSize < 4096) {
-        const chunk = await iterator.next()
-        if (chunk.done) break
-        const bytes = Buffer.from(chunk.value)
-        prefix.push(bytes)
-        prefixSize += bytes.length
-        const start = Buffer.concat(prefix).toString('utf8').trimStart()
-        if (/^(?:data|event|id|retry):|^:/.test(start)) {
-          streaming = true
-          break
-        }
-        if (/^[{[]/.test(start)) {
-          streaming = false
-          break
-        }
-        if (start && !['data:', 'event:', 'id:', 'retry:'].some((field) => field.startsWith(start)))
-          break
-      }
-    } catch (error) {
-      source.destroy()
-      throw error
-    }
+    const { source, streaming } = await inspectUpstreamBody(
+      response.body,
+      response.headers.get('content-type')
+    )
     if (streaming) streamStarted = receivedAt
-    async function* chunks(): AsyncGenerator<Buffer> {
-      try {
-        yield* prefix
-        for await (const chunk of iterator) yield Buffer.from(chunk)
-      } finally {
-        source.destroy()
-      }
-    }
     const ids = new ResponseIdsObserver(
       streaming,
       (id) => {
@@ -163,7 +129,7 @@ export async function testAccountModel(
     let raw = ''
     let size = 0
     const decoder = new TextDecoder()
-    await pipeline(chunks(), ids, firstToken, async (chunks: AsyncIterable<Buffer>) => {
+    await pipeline(source, ids, firstToken, async (chunks: AsyncIterable<Buffer>) => {
       for await (const chunk of chunks) {
         size += chunk.length
         if (size > 1024 * 1024) throw new Error('测试响应超过 1 MB')

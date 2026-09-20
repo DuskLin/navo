@@ -186,7 +186,7 @@ test('Codex 网关三协议转发、非流式原始响应与流式透传', async
     assert.equal(payload.store, false)
     assert.equal(typeof payload.instructions, 'string')
     calls++
-    return new Response(events, { headers: { 'content-type': 'text/event-stream' } })
+    return new Response(new TextEncoder().encode(events))
   }
   const gateway = new Gateway(f.store, request, models, models)
   try {
