@@ -308,12 +308,23 @@ h1 {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 18px;
+  gap: 12px;
 }
 .filters {
   display: flex;
   gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 3px;
+  margin: -3px;
+}
+.filters::-webkit-scrollbar {
+  display: none;
 }
 .filters button {
+  flex: 0 0 auto;
+  white-space: nowrap;
   border: 0;
   background: transparent;
   border-radius: 9px;
@@ -340,6 +351,7 @@ h1 {
   background: #ffffff2a;
 }
 .account-count {
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -1085,7 +1097,7 @@ h2 {
   }
   .filters button {
     padding: 0 13px;
-    flex: 1;
+    flex: 0 0 auto;
     font-size: 12px;
     min-height: 40px;
     border-radius: 20px;
@@ -1648,11 +1660,20 @@ h2 {
     font-size: 18px;
   }
   .quota-overview .filters {
-    gap: 5px;
+    gap: 8px;
   }
   .quota-overview .filters button {
     min-height: 40px;
-    border-radius: 9px;
+    padding: 0 16px;
+    border-radius: 20px;
+    background: var(--panel);
+    color: var(--muted);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .quota-overview .filters button.active {
+    background: var(--blue);
+    color: #fff;
+    box-shadow: none;
   }
   .quota-overview .list-toolbar {
     margin-bottom: 10px;
