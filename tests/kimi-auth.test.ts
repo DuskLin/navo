@@ -60,6 +60,7 @@ test('local Kimi credentials use the configured directory and device identity', 
 
 test('Kimi import deduplicates, preserves edits and survives encrypted storage reload', async () => {
   const { dir, store } = await fixture()
+  let gateway: Gateway | undefined
   try {
     const service = new KimiAuth(store, metadata, async () => parseKimiAuth(auth(), 'device-test'))
     const id = await service.importLocal('mainland-cn')
@@ -75,7 +76,7 @@ test('Kimi import deduplicates, preserves edits and survives encrypted storage r
     await reload.load()
     assert.deepEqual(reload.get().accounts[0].credential, store.get().accounts[0].credential)
     assert.equal(reload.get().accounts[0].kind, 'oauth')
-    const gateway = new Gateway(reload, metadata)
+    gateway = new Gateway(reload, metadata)
     const snapshot = gateway.snapshot()
     assert.equal(JSON.stringify(snapshot).includes('access-secret'), false)
     assert.equal(JSON.stringify(snapshot).includes('refresh-secret'), false)
@@ -86,6 +87,7 @@ test('Kimi import deduplicates, preserves edits and survives encrypted storage r
       /导入/
     )
   } finally {
+    gateway?.history.close()
     await rm(dir, { recursive: true, force: true })
   }
 })
