@@ -550,6 +550,8 @@ export class Gateway {
     let streamStartedAt: number | null = null
     let streamDurationMs: number | null = null
     let protocol: UsageProtocol | undefined
+    let inboundRoute: string | undefined
+    let upstreamRoute: string | null = null
     let sessionId: string | undefined
     let accountId: string | undefined
     let provider: RequestRecord['provider']
@@ -593,6 +595,7 @@ export class Gateway {
       const match = pathname.match(/^\/groups\/([^/]+)(\/v1\/.*)$/)
       const route = match ? match[2] : pathname
       if (!routes.has(route)) throw new HttpError(404, '接口不存在')
+      inboundRoute = route
       isRegistry = route === '/api.json'
       const isModels = route === '/v1/models' || isRegistry
       protocol =
@@ -725,6 +728,7 @@ export class Gateway {
         accountId = account.id
         provider = account.provider ?? 'kimi'
         attempts++
+        upstreamRoute = null
         if (flowId) this.liveFlows.update(flowId, { state: 'waiting' })
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
@@ -786,6 +790,7 @@ export class Gateway {
             headers.set('session_id', goSession)
           }
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
+          upstreamRoute = targetRoute
           const upstream = await this.request(
             `${upstreamUrl(account.region, account.provider, targetRoute)}${url.search}`,
             {
@@ -1046,6 +1051,8 @@ export class Gateway {
           sessionId,
           provider,
           protocol,
+          inboundRoute,
+          upstreamRoute,
           usage,
           interruption,
           streamDurationMs,

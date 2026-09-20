@@ -1553,12 +1553,13 @@ export function GatewayPanel({
                       </div>
                     ) : (
                       <div className="table-scroll">
-                        <table>
+                        <table className="request-history-table">
                           <thead>
                             <tr>
                               <th>时间</th>
                               <th>账号 / Request ID</th>
                               <th>模型</th>
+                              <th>协议转换</th>
                               <th title="客户端请求中指定的思考强度；未指定或旧记录显示 —">
                                 思考强度
                               </th>
@@ -1586,6 +1587,25 @@ export function GatewayPanel({
                                   )}
                                 </td>
                                 <td className="model-cell">{r.model || '模型列表'}</td>
+                                <td className="protocol-conversion-cell">
+                                  <div>
+                                    <span className="muted">入站：</span>
+                                    <code>
+                                      {r.inboundRoute ??
+                                        MODEL_PROTOCOLS.find((p) => p.value === r.protocol)
+                                          ?.route ??
+                                        '—'}
+                                    </code>
+                                  </div>
+                                  <div>
+                                    <span className="muted">转发：</span>
+                                    <code>
+                                      {r.upstreamRoute === null
+                                        ? '未转发'
+                                        : (r.upstreamRoute ?? '—')}
+                                    </code>
+                                  </div>
+                                </td>
                                 <td>{r.reasoningEffort ?? '—'}</td>
                                 <td>
                                   <span

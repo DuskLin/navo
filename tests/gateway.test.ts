@@ -1469,6 +1469,67 @@ test('Responses、Chat Completions、Messages 原路径、请求体及 JSON/SSE 
     assert.equal(restored.snapshot().requests.length, 6)
     assert.equal(restored.snapshot().requests[0].upstreamRequestId, 'upstream-trace')
     assert.equal(restored.snapshot().requests[0].reasoningEffort, 'medium')
+    assert.deepEqual(
+      restored.snapshot().requests.map((r) => [r.inboundRoute, r.upstreamRoute]),
+      [
+        '/v1/messages',
+        '/v1/messages',
+        '/v1/chat/completions',
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/v1/responses'
+      ].map((route) => [route, route])
+    )
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('协议转换记录入站和实际转发路径，重启后保留且未转发不猜测路径', async () => {
+  const forwarded: string[] = []
+  const f = await gatewayFixture(
+    (req, res) => {
+      forwarded.push(req.url!)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          model: 'kimi-for-coding',
+          content: [{ type: 'text', text: 'hello' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 }
+        })
+      )
+    },
+    ['a']
+  )
+  try {
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = { 'kimi-for-coding': ['messages'] }
+    })
+    const response = await f.post({ input: 'hello' }, {}, '/v1/responses')
+    assert.equal(response.status, 200)
+    await response.text()
+    await eventually(() => f.gateway.history.page().total === 1)
+    assert.deepEqual(forwarded, ['/coding/v1/messages'])
+    const record = f.gateway.history.page().records[0]
+    assert.equal(record.inboundRoute, '/v1/responses')
+    assert.equal(record.upstreamRoute, '/v1/messages')
+    await f.store.mutate((data) => {
+      data.accounts[0].enabled = false
+    })
+    const rejected = await f.post({ input: 'hello' }, {}, '/v1/responses')
+    assert.equal(rejected.status, 503)
+    await rejected.text()
+    await eventually(() => f.gateway.history.page().total === 2)
+    await f.gateway.setRunning(false)
+    const records = f.createGateway().snapshot().requests
+    assert.equal(records[0].inboundRoute, '/v1/responses')
+    assert.equal(records[0].upstreamRoute, null)
+    assert.equal(records[1].inboundRoute, '/v1/responses')
+    assert.equal(records[1].upstreamRoute, '/v1/messages')
   } finally {
     await f.cleanup()
   }

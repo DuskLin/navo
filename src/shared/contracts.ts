@@ -209,6 +209,9 @@ export interface RequestRecord {
   streamDurationMs?: number | null
   accountId?: string
   protocol?: import('./usage').UsageProtocol
+  inboundRoute?: string
+  /** 最后一次调度实际发出的接口；null 表示未转发，undefined 表示旧记录。 */
+  upstreamRoute?: string | null
   usage?: import('./usage').TokenUsage | null
   upstreamRequestId?: string | null
   reasoningEffort?: string | null

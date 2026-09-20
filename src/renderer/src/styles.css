@@ -810,6 +810,23 @@ td small {
   border-radius: 6px;
   font-size: 12px;
 }
+.request-history-table {
+  min-width: 1100px;
+}
+.request-history-table .model-cell {
+  min-width: 140px;
+  max-width: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.protocol-conversion-cell {
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.protocol-conversion-cell code {
+  font-size: inherit;
+}
 .model-cell {
   max-width: 220px;
   overflow-wrap: anywhere;
