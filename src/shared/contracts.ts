@@ -55,6 +55,7 @@ export interface HelperApi {
   importCodexAccount(): Promise<GatewaySnapshot>
   saveAccount(input: AccountInput): Promise<GatewaySnapshot>
   inspectAccount(input: AccountProbe): Promise<AccountCapabilities>
+  testAccountModel(input: AccountModelTest): Promise<AccountModelTestResult>
   refreshAccount(id: string): Promise<GatewaySnapshot>
   deleteAccount(id: string): Promise<GatewaySnapshot>
   resetAccount(id: string): Promise<GatewaySnapshot>
@@ -113,6 +114,17 @@ export interface AccountProbe {
   id?: string
   region: Region
   secret?: string
+}
+export interface AccountModelTest extends AccountProbe {
+  name?: string
+  model: string
+  protocol: ModelProtocol
+}
+export interface AccountModelTestResult {
+  model: string
+  protocol: ModelProtocol
+  durationMs: number
+  text: string
 }
 export interface AccountCapabilities {
   balance?: AccountBalance | null
@@ -299,6 +311,7 @@ export const IPC = {
   accountImportCodex: 'account:import-codex',
   accountSave: 'account:save',
   accountInspect: 'account:inspect',
+  accountModelTest: 'account:model-test',
   accountRefresh: 'account:refresh',
   accountDelete: 'account:delete',
   accountReset: 'account:reset',

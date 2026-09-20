@@ -2413,3 +2413,122 @@ test('idle node retention is validated, defaults for older settings and persists
     await f.cleanup()
   }
 })
+
+test('model testing uses draft or saved credentials without scheduling or saving', async () => {
+  const f = await storeFixture()
+  const calls: string[] = []
+  const gateway = f.createGateway(async (_url, init) => {
+    calls.push(new Headers(init?.headers).get('authorization')!)
+    assert.equal(JSON.parse(String(init?.body)).model, 'manual-only')
+    return Response.json(
+      {
+        choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 20,
+          completion_tokens: 3,
+          prompt_tokens_details: { cached_tokens: 5 }
+        }
+      },
+      { headers: { 'x-request-id': 'model-test-request' } }
+    )
+  })
+  try {
+    const probe = {
+      region: 'mainland-cn',
+      provider: 'kimi',
+      protocol: 'chat-completions',
+      model: 'manual-only',
+      secret: 'draft-secret'
+    }
+    const before = JSON.stringify(f.store.get())
+    await gateway.testAccountModel(probe)
+    assert.equal(JSON.stringify(f.store.get()), before)
+    assert.deepEqual(calls, ['Bearer draft-secret'])
+    for (const invalid of [
+      { model: 'bad model' },
+      { protocol: 'invalid' },
+      { id: 'missing' },
+      { secret: '' },
+      { provider: 'codex' }
+    ])
+      await assert.rejects(gateway.testAccountModel({ ...probe, ...invalid }))
+    assert.equal(calls.length, 1)
+    const id = await f.store.saveAccount(accountInput('saved-probe'))
+    const saved = JSON.stringify(f.store.get())
+    await gateway.testAccountModel({ ...probe, id, secret: '' })
+    assert.equal(
+      calls[1],
+      'Bearer ' + f.store.get().accounts.find((a) => a.id === id)!.credential.accessToken
+    )
+    assert.equal(JSON.stringify(f.store.get()), saved)
+    assert.equal(gateway.history.page().total, 2)
+    const records = gateway.history.page().records
+    assert.equal(records[0].accountId, id)
+    assert.equal(records[0].group, '模型测试')
+    assert.equal(records[0].usage?.input, 15)
+    assert.equal(records[0].usage?.cacheRead, 5)
+    assert.equal(records[0].usage?.output, 3)
+    assert.equal(records[0].upstreamRequestId, 'model-test-request')
+    assert.equal(records[1].accountId, undefined)
+    assert.match(records[1].account, /未保存配置/)
+    assert.equal(gateway.history.quotaUsage(id, 0, Date.now()).length, 1)
+    const stats = gateway.history.usage(
+      { start: Date.now() - 60000, end: Date.now() + 1, bucketMs: 86400000 },
+      gateway.snapshot()
+    )
+    assert.equal(stats.summary.requests, 2)
+    assert.equal(stats.summary.totalTokens, 46)
+    assert.equal(stats.summary.costAmounts?.length, 1)
+    const restored = f.createGateway()
+    assert.equal(restored.history.page().total, 2)
+    assert.equal(restored.snapshot().requests[0].usage?.output, 3)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('failed model tests persist partial usage and contribute to account quota and cost', async () => {
+  const f = await storeFixture()
+  const gateway = f.createGateway(
+    async () =>
+      new Response(
+        [
+          { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+          { type: 'message_delta', usage: { output_tokens: 2, cost_usd: 0.03 } },
+          { type: 'error', error: { message: 'failed' } }
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+          .join(''),
+        { headers: { 'content-type': 'text/event-stream' } }
+      )
+  )
+  try {
+    const id = await f.store.saveAccount(accountInput('failed-probe'))
+    await assert.rejects(
+      gateway.testAccountModel({
+        id,
+        provider: 'kimi',
+        region: 'mainland-cn',
+        model: 'manual-model',
+        protocol: 'messages'
+      })
+    )
+    const [record] = gateway.history.quotaUsage(id, Date.now() - 60000, Date.now() + 1)
+    assert.equal(record.status, 502)
+    assert.equal(record.interruption, 'upstream_error')
+    assert.equal(record.usage?.cost, 0.03)
+    assert.equal(record.usage?.output, 2)
+    assert.equal(gateway.snapshot().requests[0].id, record.id)
+    const stats = gateway.history.usage(
+      { start: Date.now() - 60000, end: Date.now() + 1, bucketMs: 86400000, accountId: id },
+      gateway.snapshot()
+    )
+    assert.equal(stats.summary.requests, 1)
+    assert.equal(stats.summary.totalTokens, 12)
+    assert.equal(stats.summary.interruptedRequests, 1)
+    assert.deepEqual(stats.summary.costAmounts, [{ currency: 'USD', value: 0.03 }])
+    assert.ok(!JSON.stringify(record).includes('failed-probe-key'))
+  } finally {
+    await f.cleanup()
+  }
+})

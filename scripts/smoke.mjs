@@ -167,7 +167,7 @@ const upstream = createServer((req, res) => {
         completion_tokens: 100,
         prompt_tokens_details: { cached_tokens: 800 }
       },
-      choices: [{ message: { role: 'assistant', content: 'ok' } }]
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
     })
   )
 })
@@ -424,6 +424,20 @@ try {
       .waitFor()
     assert.equal(await page.getByLabel('账号并发上限', { exact: true }).inputValue(), '30')
     if (name === '开发账号 A') {
+      await page
+        .getByLabel('kimi-for-coding 测试协议', { exact: true })
+        .selectOption('chat-completions')
+      await page.getByRole('button', { name: '测试模型 kimi-for-coding', exact: true }).click()
+      await page.locator('.model-test-result summary').filter({ hasText: '成功' }).waitFor()
+      await page.locator('.model-test-result summary').click()
+      await page.locator('.model-test-result p').getByText('ok', { exact: true }).waitFor()
+      assert.equal(forwarded.pop(), 'Bearer smoke-secret-a')
+      const testRecords = await page.evaluate(() => window.navo.getRequestHistory())
+      assert.equal(testRecords.records[0].group, '模型测试')
+      assert.equal(testRecords.records[0].usage.output, 100)
+      assert.equal(testRecords.records[0].usage.cacheRead, 800)
+
+      await page.screenshot({ path: join(artifacts, 'account-model-test.png') })
       await page.getByLabel('账号并发上限', { exact: true }).fill('5')
       const scrollBody = page.locator('.modal-scroll-body')
       assert.equal(await scrollBody.evaluate((el) => getComputedStyle(el).scrollbarWidth), 'none')
@@ -626,7 +640,7 @@ try {
     'Bearer smoke-secret-b',
     'Bearer smoke-secret-b'
   ])
-  await page.waitForFunction(async () => (await window.navo.getGateway()).requests.length === 4)
+  await page.waitForFunction(async () => (await window.navo.getGateway()).requests.length === 5)
   await page.getByRole('button', { name: '返回概览', exact: true }).click()
   await page.getByRole('button', { name: '调度页', exact: true }).click()
   await page.locator('.flow-node.model').first().waitFor()
@@ -686,7 +700,7 @@ try {
     await page.getByRole('button', { name: '额度页', exact: true }).getAttribute('aria-pressed'),
     'true'
   )
-  await page.getByText('4,400', { exact: true }).waitFor()
+  await page.getByText('5,500', { exact: true }).waitFor()
   const autoRefresh = page.getByRole('button', { name: '切换自动刷新间隔', exact: true })
   for (const label of ['5s', '15s', '30s']) {
     assert.equal(await autoRefresh.textContent(), label)
@@ -766,7 +780,7 @@ try {
   await heatmap.getByRole('button', { name: '每日', exact: true }).click()
   await heatmap.locator('.heatmap-day.is-today').click()
   await heatmap.getByText('kimi-for-coding', { exact: true }).waitFor()
-  assert.match(await heatmap.locator('.heatmap-day-summary').textContent(), /4 次请求.*4,400/)
+  assert.match(await heatmap.locator('.heatmap-day-summary').textContent(), /5 次请求.*5,500/)
   await heatmap.scrollIntoViewIfNeeded()
   await page.screenshot({ path: join(artifacts, 'heatmap.png') })
   await heatmap.getByRole('button', { name: '收起', exact: true }).click()
@@ -977,7 +991,7 @@ try {
   await costTooltip.waitFor({ state: 'hidden' })
   await page.getByText('模型列表', { exact: true }).waitFor()
   // 重启后旧请求仍可查看；新增请求通过 10 条游标分页访问。
-  assert.equal(restoredGateway.requests.length, 4)
+  assert.equal(restoredGateway.requests.length, 5)
   for (let i = 0; i < 11; i++) {
     const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
       method: 'POST',
@@ -987,7 +1001,7 @@ try {
     assert.equal(response.status, 200)
     await response.text()
   }
-  await page.getByText('共 16 条', { exact: true }).waitFor()
+  await page.getByText('共 17 条', { exact: true }).waitFor()
   assert.equal(await page.getByRole('row').count(), 11)
   await page
     .getByText('requestId: 6adf4190-2959-4444-878c-454c7a6673ad', { exact: true })
@@ -995,7 +1009,7 @@ try {
     .waitFor()
   await page.getByRole('button', { name: '下一页', exact: true }).click()
   await page.getByText('第 2 页', { exact: true }).waitFor()
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 6)
+  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 7)
   await page.getByRole('button', { name: '上一页', exact: true }).click()
   await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 10)
   await page.screenshot({ path: join(artifacts, 'requests.png') })

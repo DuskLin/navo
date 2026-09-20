@@ -1080,7 +1080,7 @@ textarea {
 }
 .model-protocol-list table {
   width: 100%;
-  min-width: 460px;
+  min-width: 720px;
   table-layout: fixed;
 }
 .model-protocol-list th,
@@ -1093,7 +1093,7 @@ textarea {
   width: 44px;
 }
 .model-protocol-list th:first-child {
-  width: 40%;
+  width: 30%;
   text-align: left;
   padding-left: 12px;
 }
@@ -2749,4 +2749,41 @@ textarea {
 }
 .manual-model-controls button {
   flex-shrink: 0;
+}
+
+.model-protocol-list .model-test-heading {
+  width: 180px;
+}
+.model-test-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-test-controls select {
+  min-width: 0;
+  width: 105px;
+  font-size: 11px;
+  padding: 5px;
+}
+.model-test-controls .button {
+  padding: 5px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.model-test-result {
+  margin-top: 6px;
+  text-align: left;
+}
+.model-test-result summary {
+  cursor: pointer;
+}
+.model-test-result p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.modal.account-editor-modal {
+  width: min(800px, calc(100vw - 32px));
 }

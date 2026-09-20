@@ -1,3 +1,5 @@
+import { testAccountModel } from './account-model-test'
+import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
 import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -9,6 +11,7 @@ import { pipeline } from 'node:stream/promises'
 import {
   upstreamUrl,
   type AccountCapabilities,
+  type AccountModelTestResult,
   type GatewaySnapshot,
   type RequestRecord,
   type Region
@@ -349,6 +352,69 @@ export class Gateway {
     const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
     return this.capabilities.get(input.region as Region, key, false, provider)
+  }
+  private recordRequest(record: RequestRecord): void {
+    try {
+      this.history.append(record)
+    } catch {
+      this.error = '请求记录保存失败，请检查磁盘空间与文件权限'
+    }
+    this.requests.unshift(record)
+    this.requests = this.requests.slice(0, 10)
+  }
+  async testAccountModel(value: unknown): Promise<AccountModelTestResult> {
+    const input = object(value)
+    const model = string(input.model, '模型 ID', 200)
+    if (/[\s\x00-\x1f\x7f]/.test(model)) throw new Error('模型 ID 无效')
+    const protocol = MODEL_PROTOCOLS.find((p) => p.value === input.protocol)?.value
+    if (!protocol) throw new Error('测试协议无效')
+    if (!['mainland-cn', 'global'].includes(input.region as string)) throw new Error('账号区域无效')
+    const old = input.id
+      ? this.store.get().accounts.find((a) => a.id === string(input.id, '账号 ID'))
+      : undefined
+    if (input.id && !old) throw new Error('账号不存在')
+    const provider = validateProvider(input.provider ?? old?.provider)
+    if (old && provider !== old.provider && !input.secret)
+      throw new Error('切换供应商请填写新的 API Key')
+    if (provider === 'codex' && (!old || old.provider !== 'codex'))
+      throw new Error('请先导入本地 Codex 认证')
+    if (provider === 'codex' && protocol !== 'responses')
+      throw new Error('Codex 仅支持 Responses 测试')
+    const credential =
+      provider === 'codex'
+        ? await this.codex.credential(old!.id)
+        : {
+            accessToken: input.secret
+              ? string(input.secret, 'API Key', 16384)
+              : (old?.credential.accessToken ?? '')
+          }
+    if (!credential.accessToken || /[\s\x00-\x1f\x7f]/.test(credential.accessToken))
+      throw new Error('请填写有效的 API Key')
+    const started = Date.now()
+    const sameAccount =
+      old &&
+      old.provider === provider &&
+      old.region === input.region &&
+      (provider === 'codex' || old.credential.accessToken === credential.accessToken)
+    const draftName = typeof input.name === 'string' ? input.name.trim().slice(0, 200) : ''
+    return testAccountModel(
+      { model, protocol, provider, region: input.region as Region },
+      credential,
+      this.request,
+      (telemetry) =>
+        this.recordRequest({
+          id: randomUUID(),
+          time: started,
+          group: '模型测试',
+          account: sameAccount ? old.name : `${draftName || old?.name || '新账号'}（未保存配置）`,
+          accountId: sameAccount ? old.id : undefined,
+          provider,
+          protocol,
+          model,
+          attempts: 1,
+          ...telemetry
+        })
+    )
   }
   async refreshAccount(value: unknown, signal?: AbortSignal): Promise<GatewaySnapshot> {
     const id = string(value, '账号 ID')
@@ -982,13 +1048,7 @@ export class Gateway {
           reasoningEffort,
           durationMs: Date.now() - started
         }
-        try {
-          this.history.append(record)
-        } catch {
-          this.error = '请求记录保存失败，请检查磁盘空间与文件权限'
-        }
-        this.requests.unshift(record)
-        this.requests = this.requests.slice(0, 10)
+        this.recordRequest(record)
       }
     }
   }

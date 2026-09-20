@@ -39,6 +39,8 @@ import {
   X
 } from 'lucide-react'
 import type {
+  AccountModelTestResult,
+  ModelProtocol,
   ModelPrice,
   ModelPriceCatalogSnapshot,
   AccountCapabilities,
@@ -1574,6 +1576,9 @@ export function GatewayPanel({
                                 <td>{new Date(r.time).toLocaleString()}</td>
                                 <td>
                                   {r.account || '未分配'}
+                                  {r.group === '模型测试' && (
+                                    <span className="badge">模型测试</span>
+                                  )}
                                   {r.upstreamRequestId && (
                                     <small className="request-id" title={r.upstreamRequestId}>
                                       requestId: {r.upstreamRequestId}
@@ -1819,6 +1824,93 @@ export function GatewayPanel({
   )
 }
 
+function ModelTestCell({ draft, model }: { draft: AccountInput; model: string }) {
+  const protocols = supportedModelProtocols(draft, model)
+  const [chosen, setChosen] = useState<ModelProtocol | ''>('')
+  const protocol = protocols.includes(chosen as ModelProtocol)
+    ? (chosen as ModelProtocol)
+    : protocols[0]
+  const [result, setResult] = useState<AccountModelTestResult | null>(null)
+  const [failure, setFailure] = useState('')
+  const [testing, setTesting] = useState(false)
+  const version = useRef(0)
+  const pending = useRef(false)
+  useEffect(() => {
+    version.current++
+    setResult(null)
+    setFailure('')
+    return () => {
+      version.current++
+    }
+  }, [draft, protocol])
+  async function testModel() {
+    if (pending.current || !protocol) return
+    pending.current = true
+    const current = ++version.current
+    setTesting(true)
+    setResult(null)
+    setFailure('')
+    try {
+      const response = await api.testAccountModel({
+        name: draft.name,
+        id: draft.id,
+        provider: draft.provider,
+        region: draft.region,
+        secret: draft.secret,
+        model,
+        protocol
+      })
+      if (current === version.current) setResult(response)
+    } catch (error) {
+      if (current === version.current) setFailure(errorText(error))
+    } finally {
+      pending.current = false
+      setTesting(false)
+    }
+  }
+  return (
+    <td className="model-test-cell">
+      <div className="model-test-controls">
+        <select
+          aria-label={`${model} 测试协议`}
+          value={protocol ?? ''}
+          disabled={testing || !protocol}
+          onChange={(event) => setChosen(event.target.value as ModelProtocol)}
+        >
+          {MODEL_PROTOCOLS.filter((p) => protocols.includes(p.value)).map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="button"
+          disabled={testing || !protocol || (!draft.id && !draft.secret?.trim())}
+          onClick={() => void testModel()}
+          aria-label={`测试模型 ${model}`}
+        >
+          {testing ? '测试中…' : '测试'}
+        </button>
+      </div>
+      <div role="status" aria-live="polite">
+        {result && (
+          <details className="model-test-result">
+            <summary>成功 · {formatLatency(result.durationMs)}</summary>
+            <p>{result.text}</p>
+          </details>
+        )}
+        {failure && (
+          <details className="model-test-result danger" open>
+            <summary>测试失败</summary>
+            <p>{failure}</p>
+          </details>
+        )}
+      </div>
+    </td>
+  )
+}
+
 function AccountEditor({
   input,
   close,
@@ -1915,7 +2007,11 @@ function AccountEditor({
     }
   }
   return (
-    <Modal title={input.id ? '编辑账号' : '添加账号'} close={close}>
+    <Modal
+      title={input.id ? '编辑账号' : '添加账号'}
+      close={close}
+      className="account-editor-modal"
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -2071,6 +2167,7 @@ function AccountEditor({
               勾选模型在此账号上原生支持的
               API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
               删除仅作用于此账号，保存后生效，上游同步不会恢复已删除模型。
+              测试使用当前填写的账号配置和所选协议发送简短请求，无需保存，会消耗少量额度。
             </p>
             <div className="manual-model-entry">
               <label htmlFor="manual-model-id">手动添加模型</label>
@@ -2124,6 +2221,9 @@ function AccountEditor({
                           {p.label}
                         </th>
                       ))}
+                      <th scope="col" className="model-test-heading">
+                        测试
+                      </th>
                       <th scope="col">操作</th>
                     </tr>
                   </thead>
@@ -2157,6 +2257,7 @@ function AccountEditor({
                               />
                             </td>
                           ))}
+                          <ModelTestCell draft={draft} model={model} />
                           <td>
                             <button
                               type="button"

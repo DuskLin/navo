@@ -44,6 +44,7 @@ const api: HelperApi = {
   importCodexAccount: () => ipcRenderer.invoke(IPC.accountImportCodex),
   saveAccount: (input) => ipcRenderer.invoke(IPC.accountSave, input),
   inspectAccount: (input) => ipcRenderer.invoke(IPC.accountInspect, input),
+  testAccountModel: (input) => ipcRenderer.invoke(IPC.accountModelTest, input),
   refreshAccount: (id) => ipcRenderer.invoke(IPC.accountRefresh, id),
   deleteAccount: (id) => ipcRenderer.invoke(IPC.accountDelete, id),
   resetAccount: (id) => ipcRenderer.invoke(IPC.accountReset, id),

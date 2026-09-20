@@ -331,6 +331,7 @@ void app
     handle(IPC.accountImportCodex, () => service.importCodexAccount())
     handle(IPC.accountSave, (value) => service.saveAccount(value))
     handle(IPC.accountInspect, (value) => service.inspectAccount(value))
+    handle(IPC.accountModelTest, (value) => service.testAccountModel(value))
     handle(IPC.accountRefresh, (value) => service.refreshAccount(value))
     handle(IPC.accountDelete, async (value) => {
       await gatewayStore.deleteAccount(value)
