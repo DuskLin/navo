@@ -1,3 +1,4 @@
+import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import codexLogo from './assets/models/openai.svg'
 import { Modal } from './Modal'
 import {
@@ -1952,7 +1953,15 @@ function ModelTestCell({ draft, model }: { draft: AccountInput; model: string })
         <button
           type="button"
           className="button"
-          disabled={testing || !protocol || (!draft.id && !draft.secret?.trim())}
+          disabled={
+            testing ||
+            !protocol ||
+            (!draft.id && !draft.secret?.trim()) ||
+            requiresKimiUserAgent(draft)
+          }
+          title={
+            requiresKimiUserAgent(draft) ? '仅允许 Kimi UA 调用，请使用 Kimi 客户端测试' : undefined
+          }
           onClick={() => void testModel()}
           aria-label={`测试模型 ${model}`}
         >
@@ -1989,6 +1998,7 @@ function AccountEditor({
   saved: (data: GatewaySnapshot) => void
 }) {
   const [draft, setDraft] = useState(input)
+  const [confirmNonKimi, setConfirmNonKimi] = useState(false)
   const [manualModel, setManualModel] = useState('')
   const [manualModelError, setManualModelError] = useState('')
   const [error, setError] = useState('')
@@ -2061,7 +2071,7 @@ function AccountEditor({
     }
   }, [])
   async function save() {
-    if (lock.current) return
+    if (lock.current || confirmNonKimi) return
     lock.current = true
     setBusy(true)
     setError('')
@@ -2075,341 +2085,389 @@ function AccountEditor({
     }
   }
   return (
-    <Modal
-      title={input.id ? '编辑账号' : '添加账号'}
-      close={close}
-      className="account-editor-modal"
-    >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          void save()
-        }}
+    <>
+      <Modal
+        title={input.id ? '编辑账号' : '添加账号'}
+        close={close}
+        className="account-editor-modal"
       >
-        <fieldset disabled={busy}>
-          <Field label="账号名称">
-            <input
-              required
-              maxLength={120}
-              value={draft.name}
-              placeholder="例如：日常开发账号"
-              onChange={(e) => change('name', e.target.value)}
-              autoFocus
-            />
-          </Field>
-          <Field label="供应商">
-            <select
-              disabled={input.kind === 'oauth'}
-              value={
-                draft.provider === 'kimi' && draft.kind === 'oauth'
-                  ? 'kimi-local'
-                  : (draft.provider ?? 'kimi')
-              }
-              onChange={(e) => {
-                if (e.target.value === 'kimi-local') importKimi(draft.region)
-                else change('provider', e.target.value as AccountInput['provider'])
-              }}
-            >
-              {input.provider === 'codex' && <option value="codex">Codex · 本地认证</option>}
-              <option value="kimi">Kimi Code · API Key</option>
-              {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
-                <option value="kimi-local">Kimi Code · 本地登录态</option>
-              )}
-              <option value="deepseek">DeepSeek · 按量付费</option>
-              <option value="opencode-go">OpenCode Go · 订阅</option>
-            </select>
-          </Field>
-          {(draft.provider ?? 'kimi') === 'kimi' && (
-            <Field label="账号区域">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            void save()
+          }}
+        >
+          <fieldset disabled={busy}>
+            <Field label="账号名称">
+              <input
+                required
+                maxLength={120}
+                value={draft.name}
+                placeholder="例如：日常开发账号"
+                onChange={(e) => change('name', e.target.value)}
+                autoFocus
+              />
+            </Field>
+            <Field label="供应商">
               <select
                 disabled={input.kind === 'oauth'}
-                value={draft.region}
-                onChange={(e) => change('region', e.target.value as AccountInput['region'])}
+                value={
+                  draft.provider === 'kimi' && draft.kind === 'oauth'
+                    ? 'kimi-local'
+                    : (draft.provider ?? 'kimi')
+                }
+                onChange={(e) => {
+                  if (e.target.value === 'kimi-local') importKimi(draft.region)
+                  else change('provider', e.target.value as AccountInput['provider'])
+                }}
               >
-                <option value="mainland-cn">中国区 · kimi.com</option>
-                <option value="global">国际区 · kimi.ai</option>
+                {input.provider === 'codex' && <option value="codex">Codex · 本地认证</option>}
+                <option value="kimi">Kimi Code · API Key</option>
+                {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
+                  <option value="kimi-local">Kimi Code · 本地登录态</option>
+                )}
+                <option value="deepseek">DeepSeek · 按量付费</option>
+                <option value="opencode-go">OpenCode Go · 订阅</option>
               </select>
             </Field>
-          )}
-          {draft.kind !== 'oauth' && (
-            <Field
-              label="API Key"
-              hint={
-                input.id
-                  ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
-                  : draft.provider === 'opencode-go'
-                    ? '填写已订阅 Go 的 OpenCode API Key。'
-                    : draft.provider === 'deepseek'
-                      ? '填写 DeepSeek 开放平台生成的密钥。'
-                      : '填写 Kimi Code 控制台生成的密钥。'
-              }
-            >
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={draft.secret ?? ''}
-                required={!input.id || (draft.provider ?? 'kimi') !== (input.provider ?? 'kimi')}
-                placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
-                onChange={(e) => change('secret', e.target.value)}
-                onBlur={() => {
-                  if (draft.secret?.trim()) void inspect()
-                }}
-              />
-            </Field>
-          )}
-          {draft.provider === 'kimi' && draft.kind === 'oauth' && (
-            <p className="muted">
-              认证来自本地 Kimi Code；更新登录态请在「添加账号」中选择「Kimi Code · 本地登录态」。
-            </p>
-          )}
-          {draft.provider === 'codex' && (
-            <p className="muted">
-              认证来自本地 Codex，更新凭据请前往「实验性功能 → 导入本地 Codex 认证」。
-            </p>
-          )}
-          <Field label="上游 Base URL" hint="由供应商和区域自动确定，转发时按协议选择端点。">
-            <input type="url" readOnly value={accountBaseUrl(draft.region, draft.provider)} />
-          </Field>
-          <div className="form-grid">
-            <Field
-              label="账号并发上限"
-              hint={
-                draft.concurrencyOverride != null
-                  ? '手动设置优先，刷新上游不会覆盖。有效范围 1–1000。'
-                  : `自动模式：优先采用上游值，未获取到时默认 ${DEFAULT_ACCOUNT_CONCURRENCY}。`
-              }
-            >
-              <input
-                type="number"
-                required
-                min={draft.concurrencyOverride == null ? 0 : 1}
-                max={draft.concurrencyOverride == null ? 100000 : 1000}
-                value={
-                  Number.isNaN(draft.concurrencyOverride)
-                    ? ''
-                    : (draft.concurrencyOverride ??
-                      capabilities?.maxConcurrency ??
-                      DEFAULT_ACCOUNT_CONCURRENCY)
+            {(draft.provider ?? 'kimi') === 'kimi' && (
+              <Field label="账号区域">
+                <select
+                  disabled={input.kind === 'oauth'}
+                  value={draft.region}
+                  onChange={(e) => change('region', e.target.value as AccountInput['region'])}
+                >
+                  <option value="mainland-cn">中国区 · kimi.com</option>
+                  <option value="global">国际区 · kimi.ai</option>
+                </select>
+              </Field>
+            )}
+            {draft.kind !== 'oauth' && (
+              <Field
+                label="API Key"
+                hint={
+                  input.id
+                    ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
+                    : draft.provider === 'opencode-go'
+                      ? '填写已订阅 Go 的 OpenCode API Key。'
+                      : draft.provider === 'deepseek'
+                        ? '填写 DeepSeek 开放平台生成的密钥。'
+                        : '填写 Kimi Code 控制台生成的密钥。'
                 }
-                onChange={(event) => change('concurrencyOverride', event.target.valueAsNumber)}
-              />
-            </Field>
-          </div>
-          <div className="concurrency-mode">
-            <small>
-              {draft.concurrencyOverride == null
-                ? '当前使用自动并发上限'
-                : `自动值：${capabilities?.maxConcurrency ?? `${DEFAULT_ACCOUNT_CONCURRENCY}（默认）`}`}
-            </small>
-            {draft.concurrencyOverride != null && (
-              <button
-                className="text-button"
-                type="button"
-                onClick={() => change('concurrencyOverride', null)}
               >
-                恢复自动
-              </button>
-            )}
-          </div>
-          <div className="capability-sync">
-            <button
-              className="button"
-              type="button"
-              disabled={busy || reading || (!input.id && !draft.secret?.trim())}
-              onClick={() => void inspect()}
-            >
-              <RotateCcw size={14} />
-              {reading ? '正在获取…' : '获取上游信息'}
-            </button>
-            {capabilities && (
-              <small>已同步 {new Date(capabilities.checkedAt).toLocaleTimeString()}</small>
-            )}
-          </div>
-          <section className="model-protocols">
-            <div className="model-protocols-heading">
-              <strong>可用模型</strong>
-              {!!draft.excludedModels?.length && (
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => change('excludedModels', [])}
-                >
-                  恢复已删除模型（{draft.excludedModels.length}）
-                </button>
-              )}
-              {!!Object.keys(draft.modelProtocols ?? {}).length && (
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => change('modelProtocols', {})}
-                >
-                  恢复默认协议
-                </button>
-              )}
-            </div>
-            <p className="model-protocols-hint">
-              勾选模型在此账号上原生支持的
-              API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
-              删除仅作用于此账号，保存后生效，上游同步不会恢复已删除模型。
-              测试使用当前填写的账号配置和所选协议发送简短请求，无需保存，会消耗少量额度。
-            </p>
-            <div className="manual-model-entry">
-              <label htmlFor="manual-model-id">手动添加模型</label>
-              <div className="manual-model-controls">
                 <input
-                  id="manual-model-id"
-                  value={manualModel}
-                  maxLength={200}
-                  placeholder="填写模型 ID，如 gpt-6-astra"
-                  onChange={(event) => {
-                    setManualModel(event.target.value)
-                    setManualModelError('')
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                      event.preventDefault()
-                      addManualModel()
-                    }
+                  type="password"
+                  autoComplete="new-password"
+                  value={draft.secret ?? ''}
+                  required={!input.id || (draft.provider ?? 'kimi') !== (input.provider ?? 'kimi')}
+                  placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
+                  onChange={(e) => change('secret', e.target.value)}
+                  onBlur={() => {
+                    if (draft.secret?.trim()) void inspect()
                   }}
                 />
-                <button
-                  type="button"
-                  className="button"
-                  disabled={!manualModel.trim()}
-                  onClick={addManualModel}
-                >
-                  添加模型
-                </button>
-              </div>
-              <p className="model-protocols-hint">
-                用于补充上游未列出的模型，保存账号后生效；刷新时保留，实际可用性取决于上游账号权限。
-              </p>
-              {manualModelError && (
-                <p className="form-error" role="alert">
-                  {manualModelError}
-                </p>
-              )}
-            </div>
-            {reading ? (
-              <p className="muted" role="status">
-                正在获取…
-              </p>
-            ) : visibleModels.length ? (
-              <div className="model-protocol-list">
-                <table aria-label="可用模型">
-                  <thead>
-                    <tr>
-                      <th scope="col">模型名</th>
-                      {MODEL_PROTOCOLS.map((p) => (
-                        <th scope="col" key={p.value}>
-                          {p.label}
-                        </th>
-                      ))}
-                      <th scope="col" className="model-test-heading">
-                        测试
-                      </th>
-                      <th scope="col">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleModels.map((model) => {
-                      const selected = supportedModelProtocols(draft, model)
-                      return (
-                        <tr key={model}>
-                          <th scope="row" title={model}>
-                            {model}
-                            {draft.manualModels?.includes(model) && (
-                              <span className="badge">手动</span>
-                            )}
-                          </th>
-                          {MODEL_PROTOCOLS.map((p) => (
-                            <td key={p.value}>
-                              <input
-                                type="checkbox"
-                                aria-label={`${model} ${p.label}`}
-                                disabled={draft.provider === 'codex'}
-                                checked={selected.includes(p.value)}
-                                onChange={(event) => {
-                                  const next = event.target.checked
-                                    ? [...selected, p.value]
-                                    : selected.filter((value) => value !== p.value)
-                                  change('modelProtocols', {
-                                    ...draft.modelProtocols,
-                                    [model]: next
-                                  })
-                                }}
-                              />
-                            </td>
-                          ))}
-                          <ModelTestCell draft={draft} model={model} />
-                          <td>
-                            <button
-                              type="button"
-                              className="icon-button danger"
-                              aria-label={`删除模型 ${model}`}
-                              title={`删除模型 ${model}`}
-                              onClick={() =>
-                                change('excludedModels', [...(draft.excludedModels ?? []), model])
-                              }
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
+              </Field>
+            )}
+            {draft.provider === 'kimi' && draft.kind === 'oauth' && (
               <p className="muted">
-                {capabilities
-                  ? draft.excludedModels?.length
-                    ? '暂无可用模型，可恢复已删除模型'
-                    : '上游暂无可用模型'
-                  : '填写 API Key 后自动获取'}
+                认证来自本地 Kimi Code；更新登录态请在「添加账号」中选择「Kimi Code · 本地登录态」。
               </p>
             )}
-          </section>
-          {draft.provider === 'deepseek' ? (
-            <BalanceDetails capabilities={capabilities} loading={reading} />
-          ) : (
-            <QuotaDetails quota={capabilities?.quota} loading={reading} />
-          )}
-          {capabilities?.warning && (
-            <p className="metadata-warning">
-              {capabilityWarning(capabilities, draft.concurrencyOverride)}
-            </p>
-          )}
-          {probeError && (
+            {draft.provider === 'codex' && (
+              <p className="muted">
+                认证来自本地 Codex，更新凭据请前往「实验性功能 → 导入本地 Codex 认证」。
+              </p>
+            )}
+            {draft.provider === 'kimi' && draft.kind === 'oauth' && (
+              <Field
+                label="允许非 Kimi UA 调度"
+                hint="默认关闭，仅调度 Kimi UA 请求。开启需确认风险，不会修改请求的 User-Agent。"
+              >
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="account-policy-switch"
+                  checked={draft.kimiOAuthOnly === false}
+                  onChange={(event) => {
+                    if (event.target.checked) setConfirmNonKimi(true)
+                    else change('kimiOAuthOnly', true)
+                  }}
+                />
+              </Field>
+            )}
+            <Field label="上游 Base URL" hint="由供应商和区域自动确定，转发时按协议选择端点。">
+              <input type="url" readOnly value={accountBaseUrl(draft.region, draft.provider)} />
+            </Field>
+            <div className="form-grid">
+              <Field
+                label="账号并发上限"
+                hint={
+                  draft.concurrencyOverride != null
+                    ? '手动设置优先，刷新上游不会覆盖。有效范围 1–1000。'
+                    : `自动模式：优先采用上游值，未获取到时默认 ${DEFAULT_ACCOUNT_CONCURRENCY}。`
+                }
+              >
+                <input
+                  type="number"
+                  required
+                  min={draft.concurrencyOverride == null ? 0 : 1}
+                  max={draft.concurrencyOverride == null ? 100000 : 1000}
+                  value={
+                    Number.isNaN(draft.concurrencyOverride)
+                      ? ''
+                      : (draft.concurrencyOverride ??
+                        capabilities?.maxConcurrency ??
+                        DEFAULT_ACCOUNT_CONCURRENCY)
+                  }
+                  onChange={(event) => change('concurrencyOverride', event.target.valueAsNumber)}
+                />
+              </Field>
+            </div>
+            <div className="concurrency-mode">
+              <small>
+                {draft.concurrencyOverride == null
+                  ? '当前使用自动并发上限'
+                  : `自动值：${capabilities?.maxConcurrency ?? `${DEFAULT_ACCOUNT_CONCURRENCY}（默认）`}`}
+              </small>
+              {draft.concurrencyOverride != null && (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => change('concurrencyOverride', null)}
+                >
+                  恢复自动
+                </button>
+              )}
+            </div>
+            <div className="capability-sync">
+              <button
+                className="button"
+                type="button"
+                disabled={busy || reading || (!input.id && !draft.secret?.trim())}
+                onClick={() => void inspect()}
+              >
+                <RotateCcw size={14} />
+                {reading ? '正在获取…' : '获取上游信息'}
+              </button>
+              {capabilities && (
+                <small>已同步 {new Date(capabilities.checkedAt).toLocaleTimeString()}</small>
+              )}
+            </div>
+            <section className="model-protocols">
+              <div className="model-protocols-heading">
+                <strong>可用模型</strong>
+                {!!draft.excludedModels?.length && (
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => change('excludedModels', [])}
+                  >
+                    恢复已删除模型（{draft.excludedModels.length}）
+                  </button>
+                )}
+                {!!Object.keys(draft.modelProtocols ?? {}).length && (
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => change('modelProtocols', {})}
+                  >
+                    恢复默认协议
+                  </button>
+                )}
+              </div>
+              <p className="model-protocols-hint">
+                勾选模型在此账号上原生支持的
+                API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
+                删除仅作用于此账号，保存后生效，上游同步不会恢复已删除模型。
+                测试使用当前填写的账号配置和所选协议发送简短请求，无需保存，会消耗少量额度。
+              </p>
+              <div className="manual-model-entry">
+                <label htmlFor="manual-model-id">手动添加模型</label>
+                <div className="manual-model-controls">
+                  <input
+                    id="manual-model-id"
+                    value={manualModel}
+                    maxLength={200}
+                    placeholder="填写模型 ID，如 gpt-6-astra"
+                    onChange={(event) => {
+                      setManualModel(event.target.value)
+                      setManualModelError('')
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                        event.preventDefault()
+                        addManualModel()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={!manualModel.trim()}
+                    onClick={addManualModel}
+                  >
+                    添加模型
+                  </button>
+                </div>
+                <p className="model-protocols-hint">
+                  用于补充上游未列出的模型，保存账号后生效；刷新时保留，实际可用性取决于上游账号权限。
+                </p>
+                {manualModelError && (
+                  <p className="form-error" role="alert">
+                    {manualModelError}
+                  </p>
+                )}
+              </div>
+              {reading ? (
+                <p className="muted" role="status">
+                  正在获取…
+                </p>
+              ) : visibleModels.length ? (
+                <div className="model-protocol-list">
+                  <table aria-label="可用模型">
+                    <thead>
+                      <tr>
+                        <th scope="col">模型名</th>
+                        {MODEL_PROTOCOLS.map((p) => (
+                          <th scope="col" key={p.value}>
+                            {p.label}
+                          </th>
+                        ))}
+                        <th scope="col" className="model-test-heading">
+                          测试
+                        </th>
+                        <th scope="col">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleModels.map((model) => {
+                        const selected = supportedModelProtocols(draft, model)
+                        return (
+                          <tr key={model}>
+                            <th scope="row" title={model}>
+                              {model}
+                              {draft.manualModels?.includes(model) && (
+                                <span className="badge">手动</span>
+                              )}
+                            </th>
+                            {MODEL_PROTOCOLS.map((p) => (
+                              <td key={p.value}>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${model} ${p.label}`}
+                                  disabled={draft.provider === 'codex'}
+                                  checked={selected.includes(p.value)}
+                                  onChange={(event) => {
+                                    const next = event.target.checked
+                                      ? [...selected, p.value]
+                                      : selected.filter((value) => value !== p.value)
+                                    change('modelProtocols', {
+                                      ...draft.modelProtocols,
+                                      [model]: next
+                                    })
+                                  }}
+                                />
+                              </td>
+                            ))}
+                            <ModelTestCell draft={draft} model={model} />
+                            <td>
+                              <button
+                                type="button"
+                                className="icon-button danger"
+                                aria-label={`删除模型 ${model}`}
+                                title={`删除模型 ${model}`}
+                                onClick={() =>
+                                  change('excludedModels', [...(draft.excludedModels ?? []), model])
+                                }
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted">
+                  {capabilities
+                    ? draft.excludedModels?.length
+                      ? '暂无可用模型，可恢复已删除模型'
+                      : '上游暂无可用模型'
+                    : '填写 API Key 后自动获取'}
+                </p>
+              )}
+            </section>
+            {draft.provider === 'deepseek' ? (
+              <BalanceDetails capabilities={capabilities} loading={reading} />
+            ) : (
+              <QuotaDetails quota={capabilities?.quota} loading={reading} />
+            )}
+            {capabilities?.warning && (
+              <p className="metadata-warning">
+                {capabilityWarning(capabilities, draft.concurrencyOverride)}
+              </p>
+            )}
+            {probeError && (
+              <p className="form-error" role="alert">
+                {probeError}
+              </p>
+            )}
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={draft.enabled}
+                onChange={(e) => change('enabled', e.target.checked)}
+              />
+              启用账号，参与调度
+            </label>
+          </fieldset>
+          {error && (
             <p className="form-error" role="alert">
-              {probeError}
+              {error}
             </p>
           )}
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(e) => change('enabled', e.target.checked)}
-            />
-            启用账号，参与调度
-          </label>
-        </fieldset>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
+          <div className="modal-actions">
+            <button className="button" type="button" onClick={close}>
+              取消
+            </button>
+            <button className="button primary" disabled={busy} type="submit">
+              {busy ? '正在保存…' : '保存账号'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      {confirmNonKimi && (
+        <Modal title="允许非 Kimi UA 调度？" close={() => setConfirmNonKimi(false)}>
+          <p>
+            开启后，非 Kimi 客户端也可使用此 OAuth 账号，可能不符合 Kimi Code
+            的使用规范，并可能导致服务受限。
           </p>
-        )}
-        <div className="modal-actions">
-          <button className="button" type="button" onClick={close}>
-            取消
-          </button>
-          <button className="button primary" disabled={busy} type="submit">
-            {busy ? '正在保存…' : '保存账号'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+          <p>
+            请勿伪造或篡改客户端身份、转售账号或 API
+            访问权限，也请勿进行非个人交互式使用。开启此选项不会修改请求的
+            User-Agent，也不代表上游允许这些请求。
+          </p>
+          <p className="muted">确认后需保存账号才会生效。</p>
+          <div className="modal-actions">
+            <button type="button" className="button" onClick={() => setConfirmNonKimi(false)}>
+              保持关闭
+            </button>
+            <button
+              type="button"
+              className="button danger"
+              onClick={() => {
+                change('kimiOAuthOnly', false)
+                setConfirmNonKimi(false)
+              }}
+            >
+              我已了解风险，允许调度
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }
 

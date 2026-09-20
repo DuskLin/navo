@@ -141,12 +141,7 @@ const upstream = createServer((req, res) => {
     return
   }
   if (req.url === '/coding/v1/usages') {
-    assert.equal(
-      req.headers['user-agent'],
-      req.headers.authorization === 'Bearer smoke-kimi-oauth'
-        ? 'kimi-code-cli/0.42.0'
-        : 'KimiCLI/1.6'
-    )
+    assert.doesNotMatch(req.headers['user-agent'] ?? '', /kimi-code-cli|KimiCLI/i)
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(
       JSON.stringify({
@@ -452,9 +447,21 @@ try {
   const kimiEditor = page.getByRole('dialog', { name: '编辑账号' })
   assert.equal(await kimiEditor.getByLabel('API Key', { exact: true }).count(), 0)
   assert.equal(await kimiEditor.getByLabel('账号区域', { exact: true }).isDisabled(), true)
+  const kimiUAGate = kimiEditor.getByRole('switch', { name: '允许非 Kimi UA 调度', exact: true })
+  assert.equal(await kimiUAGate.isChecked(), false)
+  await kimiUAGate.click()
+  const kimiWarning = page.getByRole('dialog', { name: '允许非 Kimi UA 调度？', exact: true })
+  await kimiWarning.waitFor()
+  await kimiWarning.getByRole('button', { name: '保持关闭', exact: true }).click()
+  assert.equal(await kimiUAGate.isChecked(), false)
+  await kimiUAGate.click()
+  await kimiWarning.getByRole('button', { name: '我已了解风险，允许调度', exact: true }).click()
+  assert.equal(await kimiUAGate.isChecked(), true)
   await page.screenshot({ path: join(artifacts, 'kimi-local-import.png') })
   await kimiEditor.getByRole('button', { name: '保存账号', exact: true }).click()
   await kimiEditor.waitFor({ state: 'hidden' })
+  const savedKimiPolicy = await page.evaluate(() => window.navo.getGateway())
+  assert.equal(savedKimiPolicy.accounts.find((a) => a.id === importedKimi.id).kimiOAuthOnly, false)
   await page.evaluate((id) => window.navo.deleteAccount(id), importedKimi.id)
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()

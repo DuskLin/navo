@@ -2081,13 +2081,13 @@ test('后台锁定官方地址与自动元数据，拒绝伪造配置且失败�
   }
 })
 
-test('按参考项目请求头读取 parallel.limit 与额度，真实并发用于调度并可持久化', async () => {
+test('不伪造客户端 UA，读取 parallel.limit 与额度并持久化用于调度', async () => {
   const f = await storeFixture()
   const request: typeof fetch = async (input, init) => {
     if (String(input).endsWith('/models'))
       return Response.json({ data: [{ id: 'kimi-for-coding' }] })
     assert.equal(String(input), 'https://api.kimi.com/coding/v1/usages')
-    assert.equal(new Headers(init?.headers).get('user-agent'), 'KimiCLI/1.6')
+    assert.equal(new Headers(init?.headers).get('user-agent'), null)
     return Response.json({
       parallel: { limit: '30' },
       usage: { limit: '100', used: '15.5', remaining: '84.5', resetTime: '2030-01-08T00:00:00Z' },

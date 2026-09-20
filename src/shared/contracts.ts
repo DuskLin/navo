@@ -92,6 +92,7 @@ export interface AccountInput {
   id?: string
   name: string
   kind: 'api-key' | 'oauth'
+  kimiOAuthOnly?: boolean
   region: Region
   enabled: boolean
   concurrencyOverride?: number | null

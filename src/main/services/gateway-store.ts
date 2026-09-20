@@ -132,6 +132,9 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
     ...(v.id !== undefined ? { id: string(v.id, '账号 ID') } : {}),
     name: string(v.name, '账号名称'),
     kind: v.kind as AccountInput['kind'],
+    ...(provider === 'kimi' && v.kind === 'oauth' && v.kimiOAuthOnly !== undefined
+      ? { kimiOAuthOnly: boolean(v.kimiOAuthOnly) }
+      : {}),
     provider,
     ...(v.modelProtocols !== undefined
       ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
@@ -467,6 +470,9 @@ export class GatewayStore {
         input.manualModels ?? (old?.provider === input.provider ? old?.manualModels : undefined)
       const account: StoredAccount = {
         ...input,
+        ...(input.provider === 'kimi' && input.kind === 'oauth'
+          ? { kimiOAuthOnly: input.kimiOAuthOnly ?? old?.kimiOAuthOnly ?? true }
+          : {}),
         ...(modelProtocols !== undefined ? { modelProtocols } : {}),
         ...(excludedModels !== undefined ? { excludedModels } : {}),
         ...(manualModels !== undefined ? { manualModels } : {}),

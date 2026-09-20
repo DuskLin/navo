@@ -108,8 +108,6 @@ export class KimiCapabilities {
         headers: {
           authorization: `Bearer ${key}`,
           accept: 'application/json',
-          // 与参考项目 quota dashboard 一致，用量接口按此版本返回 parallel 等完整字段。
-          ...(new URL(url).pathname.endsWith('/usages') ? { 'user-agent': 'KimiCLI/1.6' } : {}),
           ...headers
         },
         signal,

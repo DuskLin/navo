@@ -2299,6 +2299,7 @@ textarea {
   font-size: 10px;
   color: var(--muted);
 }
+input.account-policy-switch[role='switch'],
 .settings-toggle-row input[role='switch'] {
   appearance: none;
   -webkit-appearance: none;
@@ -2312,6 +2313,7 @@ textarea {
   cursor: pointer;
   position: relative;
 }
+input.account-policy-switch[role='switch']::after,
 .settings-toggle-row input[role='switch']::after {
   content: '';
   position: absolute;
@@ -2324,10 +2326,12 @@ textarea {
   box-shadow: 0 1px 3px #0002;
   transition: transform 0.15s;
 }
+input.account-policy-switch[role='switch']:checked,
 .settings-toggle-row input[role='switch']:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
+input.account-policy-switch[role='switch']:checked::after,
 .settings-toggle-row input[role='switch']:checked::after {
   transform: translateX(12px);
 }
@@ -2803,4 +2807,9 @@ textarea {
 
 .modal.account-editor-modal {
   width: min(800px, calc(100vw - 32px));
+}
+
+input.account-policy-switch[role='switch'] {
+  padding: 0;
+  flex-shrink: 0;
 }

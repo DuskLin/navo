@@ -1,3 +1,4 @@
+import { isKimiUserAgent, requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import { KimiAuth, kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
@@ -396,6 +397,8 @@ export class Gateway {
     const provider = validateProvider(input.provider ?? old?.provider)
     if (old && provider !== old.provider && !input.secret)
       throw new Error('切换供应商请填写新的 API Key')
+    if (old && provider === old.provider && !input.secret && requiresKimiUserAgent(old))
+      throw new Error('此账号仅允许 Kimi UA 调用，Navo 模型测试不可用；请使用 Kimi 客户端测试')
     if (provider === 'codex' && (!old || old.provider !== 'codex'))
       throw new Error('请先导入本地 Codex 认证')
     if (
@@ -750,10 +753,23 @@ export class Gateway {
           enabled: true,
           stickySeconds: latest.settings.stickySeconds ?? 300
         }
-        const pool = latest.accounts.map((account) => ({
+        const available = latest.accounts.map((account) => ({
           ...account,
           memberships: [{ groupId: 'default', priority: 0, weight: 1 }]
         }))
+        const pool = available.filter(
+          (account) => !requiresKimiUserAgent(account) || isKimiUserAgent(req.headers['user-agent'])
+        )
+        const supportsModel = (account: (typeof available)[number]) =>
+          account.enabled &&
+          !!account.credential.accessToken &&
+          !!account.capabilities &&
+          (!model || account.models.includes(model))
+        if (available.some(supportsModel) && !pool.some(supportsModel))
+          throw new HttpError(
+            403,
+            '此模型的 Kimi OAuth 账号仅允许 Kimi User-Agent 调用；请使用 Kimi 客户端，或在账号设置中确认风险后关闭限制'
+          )
         const lease = this.scheduler.acquire(pool, liveGroup, model, session, excluded)
         if (!lease) break
         const { account } = lease

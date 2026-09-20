@@ -7,9 +7,6 @@ import { parseKimiAuth, readLocalKimiAuth } from './kimi-local'
 export function kimiHeaders(credential: Credential): Record<string, string> {
   if (!credential.kimiOAuth) return {}
   return {
-    'user-agent': 'kimi-code-cli/0.42.0',
-    'x-msh-platform': 'kimi_code_cli',
-    'x-msh-version': '0.42.0',
     'x-msh-device-name': 'Navo',
     'x-msh-device-model': `${process.platform} ${process.arch}`,
     'x-msh-os-version': process.platform,
@@ -100,6 +97,7 @@ export class KimiAuth {
           name: 'Kimi ' + credential.accountId!.slice(0, 8),
           provider: 'kimi',
           kind: 'oauth',
+          kimiOAuthOnly: true,
           region,
           enabled: true,
           memberships: [{ groupId: 'default', priority: 0, weight: 1 }],

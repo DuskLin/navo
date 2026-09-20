@@ -1,3 +1,4 @@
+import { isKimiUserAgent, requiresKimiUserAgent } from '../src/shared/kimi-client-policy'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -21,7 +22,11 @@ async function fixture() {
   return { dir, store }
 }
 const metadata: typeof fetch = async (url, init) => {
-  assert.equal(new Headers(init?.headers).get('x-msh-device-id'), 'device-test')
+  const headers = new Headers(init?.headers)
+  assert.equal(headers.get('x-msh-device-id'), 'device-test')
+  assert.equal(headers.get('user-agent'), null)
+  assert.equal(headers.get('x-msh-platform'), null)
+  assert.equal(headers.get('x-msh-version'), null)
   if (String(url).endsWith('/me')) return Response.json({ user_id: 'user-test' })
   if (String(url).endsWith('/models')) return Response.json({ data: [{ id: 'kimi-test' }] })
   return Response.json({})
@@ -163,11 +168,15 @@ test('Kimi failed import does not save partial account or expose upstream body',
 test('Kimi OAuth gateway forwards native protocols with sealed device headers', async () => {
   const { dir, store } = await fixture()
   const calls: string[] = []
+  let expectedUA = 'KimiCLI/1.6'
+  let expectedOAuth = true
   const request: typeof fetch = async (url, init) => {
     const headers = new Headers(init?.headers)
     assert.equal(headers.get('authorization'), 'Bearer access-secret')
-    assert.equal(headers.get('x-msh-device-id'), 'device-test')
-    assert.equal(headers.get('user-agent'), 'kimi-code-cli/0.42.0')
+    assert.equal(headers.get('x-msh-device-id'), expectedOAuth ? 'device-test' : null)
+    assert.equal(headers.get('user-agent'), expectedUA)
+    assert.equal(headers.get('x-msh-platform'), null)
+    assert.equal(headers.get('x-msh-version'), null)
     calls.push(String(url))
     return Response.json({
       id: 'test',
@@ -187,12 +196,39 @@ test('Kimi OAuth gateway forwards native protocols with sealed device headers', 
     await new Promise<void>((resolve, reject) => reserved.close((e) => (e ? reject(e) : resolve())))
     await gateway.saveSettings({ ...store.get().settings, port })
     await gateway.setRunning(true)
+    const oauthId = store.get().accounts[0].id
+    await assert.rejects(
+      gateway.testAccountModel({
+        id: oauthId,
+        provider: 'kimi',
+        region: 'mainland-cn',
+        model: 'kimi-test',
+        protocol: 'chat-completions'
+      }),
+      /仅允许 Kimi UA/
+    )
+    const post = (ua?: string) =>
+      fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(ua !== undefined ? { 'user-agent': ua } : {}),
+          'x-msh-platform': 'kimi_code_cli'
+        },
+        body: JSON.stringify({ model: 'kimi-test', messages: [{ role: 'user', content: 'hello' }] })
+      })
+    for (const ua of [undefined, '', 'arbitrary-client', 'not-kimi/1.0', 'curl/1.0 KimiCLI/1.6']) {
+      const rejected = await post(ua)
+      assert.equal(rejected.status, 403)
+      assert.match(await rejected.text(), /Kimi User-Agent/)
+    }
+    assert.equal(calls.length, 0)
     for (const route of ['chat/completions', 'messages', 'responses']) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/${route}`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'user-agent': 'arbitrary-client',
+          'user-agent': expectedUA,
           'x-msh-device-id': 'untrusted-device'
         },
         body: JSON.stringify({
@@ -210,10 +246,58 @@ test('Kimi OAuth gateway forwards native protocols with sealed device headers', 
       'https://api.kimi.com/coding/v1/messages',
       'https://api.kimi.com/coding/v1/responses'
     ])
-    await gateway.refreshAccount(store.get().accounts[0].id)
+    await gateway.refreshAccount(oauthId)
+    await gateway.saveAccount({ ...gateway.snapshot().accounts[0], kimiOAuthOnly: false })
+    expectedUA = 'arbitrary-client'
+    const allowed = await post(expectedUA)
+    assert.equal(allowed.status, 200)
+    await allowed.arrayBuffer()
+    await new KimiAuth(store, metadata, async () =>
+      parseKimiAuth(auth(), 'device-test')
+    ).importLocal('mainland-cn')
+    assert.equal(store.get().accounts[0].kimiOAuthOnly, false)
+    const reload = new GatewayStore(join(dir, 'gateway.json'), codec)
+    await reload.load()
+    assert.equal(reload.get().accounts[0].kimiOAuthOnly, false)
+    await gateway.saveAccount({ ...gateway.snapshot().accounts[0], kimiOAuthOnly: true })
+    const blockedAgain = await post(expectedUA)
+    assert.equal(blockedAgain.status, 403)
+    await blockedAgain.arrayBuffer()
+    // A sticky binding to the OAuth account cannot bypass the gate; an API key can still serve it.
+    await store.mutate((data) => {
+      data.accounts.push({
+        ...data.accounts[0],
+        id: 'api-account',
+        kind: 'api-key',
+        credential: { accessToken: 'access-secret' }
+      })
+    })
+    expectedOAuth = false
+    const fallback = await post(expectedUA)
+    assert.equal(fallback.status, 200)
+    await fallback.arrayBuffer()
   } finally {
     await gateway.shutdown()
     gateway.history.close()
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('Kimi UA gate defaults on only for Kimi OAuth and matches client product names', () => {
+  for (const ua of [
+    'KimiCLI/1.6',
+    'kimi-code-cli/0.42.0',
+    'kimi-code-desktop/1.0 (macOS)',
+    'kimi-code-vscode/2.0'
+  ])
+    assert.equal(isKimiUserAgent(ua), true)
+  for (const ua of [undefined, '', 'Kimi', 'not-kimi/1', 'kimi-fake/1', 'curl/1 KimiCLI/1.6'])
+    assert.equal(isKimiUserAgent(ua), false)
+  assert.equal(requiresKimiUserAgent({ provider: 'kimi', kind: 'oauth' }), true)
+  assert.equal(
+    requiresKimiUserAgent({ provider: 'kimi', kind: 'oauth', kimiOAuthOnly: false }),
+    false
+  )
+  assert.equal(requiresKimiUserAgent({ provider: 'kimi', kind: 'api-key' }), false)
+  assert.equal(requiresKimiUserAgent({ provider: 'codex', kind: 'oauth' }), false)
 })
