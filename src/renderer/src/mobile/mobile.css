@@ -1756,3 +1756,10 @@ h2 {
 .login-panel button {
   min-height: 46px;
 }
+
+html[data-theme='dark'] .provider-logo.codex {
+  background: var(--panel);
+}
+html[data-theme='dark'] .provider-logo.codex img {
+  filter: invert(1);
+}

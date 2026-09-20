@@ -47,13 +47,20 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 
 ## Supported providers
 
-| Provider    | Account type                           | Synced information                                            |
-| ----------- | -------------------------------------- | ------------------------------------------------------------- |
+| Provider    | Account type                                 | Synced information                                            |
+| ----------- | -------------------------------------------- | ------------------------------------------------------------- |
 | Kimi Code   | China / international API key or local OAuth | Models, 5-hour / 7-day quotas, concurrency limit              |
-| DeepSeek    | Platform API key, pay as you go        | Models and balances per currency, without currency conversion |
-| OpenCode Go | API key with an active Go subscription | Models and 5-hour / weekly / monthly quota windows            |
+| DeepSeek    | Platform API key, pay as you go              | Models and balances per currency, without currency conversion |
+| Codex       | Local ChatGPT OAuth login | Models, remaining quota and reset times, automatic token refresh |
+| OpenCode Go | API key with an active Go subscription       | Models and 5-hour / weekly / monthly quota windows            |
 
 The app uses fixed upstream addresses and fetches model lists from each provider. OpenCode Zen pay-as-you-go accounts are outside the current scope. Protocol availability depends on the provider and model; checking a protocol in the app does not add upstream support for it.
+
+### Local Codex authentication and manual models
+
+After signing in to Codex with ChatGPT, open **Settings → Experimental features → Import local Codex authentication** and confirm the risk notice. Navo reads the macOS `Codex Auth` Keychain entry or `auth.json` under `CODEX_HOME` (default `~/.codex`), stores credentials encrypted, and makes the account available through the local gateway. The dashboard displays only quota windows returned by the provider; a missing window is not a zero balance.
+
+All providers support **Edit account → Available models → Add model manually**. Enter the exact model ID and save the account. Manual models survive upstream refreshes and restarts; actual availability still depends on upstream account access.
 
 ## Quick start
 

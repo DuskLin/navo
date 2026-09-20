@@ -1,7 +1,15 @@
 import type { Gateway } from './gateway'
 import type { UsageService } from './usage-service'
-import type { DashboardSnapshot } from '../../shared/dashboard'
+import type { Provider } from '../../shared/contracts'
+import type { DashboardAccount, DashboardSnapshot } from '../../shared/dashboard'
 import { storedQuota } from '../../shared/kimi-quota'
+
+const providerLabels: Record<Provider, DashboardAccount['provider']> = {
+  kimi: 'Kimi',
+  deepseek: 'DeepSeek',
+  'opencode-go': 'Go',
+  codex: 'Codex'
+}
 
 /** Explicit projection: never return a desktop snapshot, request records or credentials. */
 export function dashboardSource(gateway: Gateway, usage: UsageService) {
@@ -35,12 +43,7 @@ export function dashboardSource(gateway: Gateway, usage: UsageService) {
         return {
           id: a.id,
           name: a.name,
-          provider:
-            a.provider === 'deepseek'
-              ? ('DeepSeek' as const)
-              : a.provider === 'opencode-go'
-                ? ('Go' as const)
-                : ('Kimi' as const),
+          provider: providerLabels[a.provider ?? 'kimi'],
           quota: storedQuota(cap?.quota),
           ...(cap?.balance
             ? {

@@ -1434,12 +1434,12 @@ export function GatewayPanel({
                                             account.capabilities?.quota?.unit
                                           )}
                                         </small>
-                                        {account.provider === 'opencode-go' && (
+                                        {account.capabilities?.quota?.monthly !== undefined && (
                                           <small>
                                             月{' '}
                                             {quotaRemaining(
                                               account.capabilities?.quota?.monthly,
-                                              'percent'
+                                              account.capabilities?.quota?.unit
                                             )}
                                           </small>
                                         )}

@@ -280,4 +280,15 @@ test('dashboard source projects only safe data and preserves user account names'
   assert.equal(result.accounts[0].status, 'available')
   assert.ok(!JSON.stringify(result).includes('SENTINEL'))
   assert.throws(() => source('unknown'))
+  for (const [provider, label] of Object.entries({
+    kimi: 'Kimi',
+    deepseek: 'DeepSeek',
+    'opencode-go': 'Go',
+    codex: 'Codex'
+  })) {
+    account.provider = provider
+    const mapped = await dashboardSource(gateway, usage)()
+    assert.equal(mapped.accounts[0].provider, label)
+    assert.ok(!JSON.stringify(mapped).includes('SENTINEL'))
+  }
 })

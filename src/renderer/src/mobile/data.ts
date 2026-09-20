@@ -1,6 +1,6 @@
 import type { AccountBalance, AccountQuota, QuotaWindow } from '../../../shared/contracts'
 
-export type Provider = 'Kimi' | 'DeepSeek' | 'Go'
+export type Provider = DashboardAccount['provider']
 export type { DashboardAccount } from '../../../shared/dashboard'
 import type { DashboardAccount } from '../../../shared/dashboard'
 
@@ -80,6 +80,13 @@ export function countdown(value: QuotaWindow | null | undefined, now: number) {
 export function formatTokens(tokens: number) {
   return tokens >= 1000000 ? `${(tokens / 1000000).toFixed(2)}M` : `${(tokens / 1000).toFixed(0)}K`
 }
+export const PROVIDER_NAMES: Record<Provider, string> = {
+  Kimi: 'Kimi Code',
+  DeepSeek: '按量付费',
+  Go: 'OpenCode Go',
+  Codex: 'OpenAI · Codex'
+}
+export const DASHBOARD_PROVIDERS = Object.keys(PROVIDER_NAMES) as Provider[]
 export function providerName(provider: Provider) {
-  return { Kimi: 'Kimi Code', DeepSeek: '按量付费', Go: 'OpenCode Go' }[provider]
+  return PROVIDER_NAMES[provider]
 }

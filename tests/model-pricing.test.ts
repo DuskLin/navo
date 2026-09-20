@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { GatewayStore, validateModelPrice } from '../src/main/services/gateway-store'
-import type { ModelPrice, Provider } from '../src/shared/contracts'
+import { PROVIDERS, type ModelPrice, type Provider } from '../src/shared/contracts'
 
 const price: ModelPrice = {
   provider: 'kimi',
@@ -92,6 +92,48 @@ test('prices persist independently by provider, survive account refresh, and mig
     await migrated.load()
     assert.deepEqual(migrated.get().modelPrices, [])
     assert.equal(migrated.get().accounts.length, 1)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('所有供应商的单价均可保存和重启恢复，包含 Codex OAuth', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'provider-prices-'))
+  const file = join(dir, 'gateway.json')
+  const codec = { encrypt: (v: string) => v, decrypt: (v: string) => v }
+  const store = new GatewayStore(file, codec)
+  try {
+    for (const provider of PROVIDERS) {
+      const id = await store.saveAccount(
+        {
+          provider: provider === 'codex' ? 'kimi' : provider,
+          name: provider,
+          kind: 'api-key',
+          region: 'global',
+          enabled: true,
+          secret: 'test-key',
+          memberships: [{ groupId: 'default', priority: 0, weight: 1 }]
+        },
+        { models: [price.model], maxConcurrency: null, checkedAt: Date.now(), warning: '' }
+      )
+      if (provider === 'codex')
+        await store.mutate((data) => {
+          const account = data.accounts.find((a) => a.id === id)!
+          account.provider = 'codex'
+          account.kind = 'oauth'
+          account.credential.accountId = 'workspace-test'
+        })
+      await store.saveModelPrice({ ...price, provider })
+    }
+    const restored = new GatewayStore(file, codec)
+    await restored.load()
+    assert.deepEqual(
+      restored
+        .get()
+        .modelPrices.map((p) => p.provider)
+        .sort(),
+      [...PROVIDERS].sort()
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

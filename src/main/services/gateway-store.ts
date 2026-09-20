@@ -6,6 +6,7 @@ import { storedQuota } from '../../shared/kimi-quota'
 import { storedBalance } from '../../shared/deepseek-balance'
 import {
   DEFAULT_ACCOUNT_CONCURRENCY,
+  PROVIDERS,
   accountBaseUrl,
   type Provider,
   type ModelPrice,
@@ -156,9 +157,8 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
 
 export function validateProvider(value: unknown): Provider {
   if (value === undefined) return 'kimi'
-  if (value !== 'kimi' && value !== 'deepseek' && value !== 'opencode-go' && value !== 'codex')
-    throw new Error('账号供应商无效')
-  return value
+  if (!(PROVIDERS as readonly unknown[]).includes(value)) throw new Error('账号供应商无效')
+  return value as Provider
 }
 export function validateModelProtocols(value: unknown): Record<string, ModelProtocol[]> {
   const entries = Object.entries(object(value))
@@ -545,8 +545,7 @@ export class GatewayStore {
 
 export function validateModelPrice(value: unknown): ModelPrice {
   const v = object(value)
-  if (!['kimi', 'deepseek', 'opencode-go'].includes(v.provider as string))
-    throw new Error('模型供应商无效')
+  if (!(PROVIDERS as readonly unknown[]).includes(v.provider)) throw new Error('模型供应商无效')
   if (v.currency !== 'CNY' && v.currency !== 'USD') throw new Error('价格币种无效')
   const price = (key: string): number | null => {
     const amount = v[key]

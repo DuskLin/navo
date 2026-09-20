@@ -30,12 +30,14 @@ import {
   formatTokens,
   percent,
   providerName,
+  DASHBOARD_PROVIDERS,
   type DashboardAccount,
   type Provider
 } from './data'
 import logo from '../assets/navo-logo.png'
 import kimi from '../assets/kimi.svg'
 import deepseek from '../assets/deepseek.svg'
+import openai from '../assets/models/openai.svg'
 import go from '../assets/models/opencode.svg'
 import './mobile.css'
 import type { DashboardSnapshot } from '../../../shared/dashboard'
@@ -56,7 +58,14 @@ function Identity({ account }: { account: DashboardAccount }) {
   return (
     <div className="identity">
       <span className={`provider-logo ${account.provider.toLowerCase()}`}>
-        <img src={{ Kimi: kimi, DeepSeek: deepseek, Go: go }[account.provider]} alt="" />
+        <img
+          src={
+            { Kimi: kimi, DeepSeek: deepseek, Go: go, Codex: openai }[
+              account.provider
+            ]
+          }
+          alt=""
+        />
       </span>
       <div>
         <h3>{account.name}</h3>
@@ -506,7 +515,7 @@ function App({
             </section>
             <div className="list-toolbar">
               <div className="filters" aria-label="按供应商筛选">
-                {(['全部', 'Kimi', 'DeepSeek', 'Go'] as const).map((value) => (
+                {(['全部', ...DASHBOARD_PROVIDERS] as const).map((value) => (
                   <button
                     key={value}
                     className={filter === value ? 'active' : ''}

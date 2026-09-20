@@ -74,7 +74,8 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
-export type Provider = 'kimi' | 'deepseek' | 'opencode-go' | 'codex'
+export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex'] as const
+export type Provider = (typeof PROVIDERS)[number]
 export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
 export type Strategy = 'balanced'
