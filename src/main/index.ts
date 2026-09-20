@@ -34,8 +34,10 @@ import {
 } from './services/kimi-desktop-permission'
 import kimiQuotaWidget from '../../scripts/kimi-quota/widget.js?raw'
 
-app.setName('Navo')
-app.setPath('userData', join(app.getPath('appData'), 'Navo'))
+// 源码运行不能改写安装版配置：新供应商和认证类型可能无法被旧安装版读取。
+const appName = app.isPackaged ? 'Navo' : 'Navo Dev'
+app.setName(appName)
+app.setPath('userData', join(app.getPath('appData'), appName))
 // 自动化验证使用临时目录，避免改变用户设置。
 if (process.env.NAVO_TEST_USER_DATA) app.setPath('userData', process.env.NAVO_TEST_USER_DATA)
 const ownsInstance = app.requestSingleInstanceLock()
