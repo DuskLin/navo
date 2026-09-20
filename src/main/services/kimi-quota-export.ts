@@ -1,3 +1,4 @@
+import { hasQuotaDisplay } from '../../shared/quota-display'
 import { access, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { KimiDesktopPreferences } from '../../shared/kimi-desktop'
@@ -15,7 +16,7 @@ export function quotaDisplaySnapshot(
     exportedAt: Date.now(),
     source: 'Navo',
     accounts: accounts
-      .filter((a) => a.enabled)
+      .filter((a) => a.enabled && hasQuotaDisplay(a.capabilities))
       .map((a) => ({
         id: a.id,
         name: a.name,

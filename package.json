@@ -17,7 +17,7 @@
     "test:unit": "tsc -p tsconfig.test.json && node --test artifacts/tests/tests/*.test.js",
     "test:migration:kimi": "tsc -p tsconfig.test.json && node scripts/session-migration-kimi-test.mjs",
     "test:installed": "node scripts/test-installed.mjs",
-    "test:smoke": "npm run build && node scripts/smoke.mjs && node scripts/tray-smoke.mjs && node scripts/session-migration-smoke.mjs",
+    "test:smoke": "npm run build && node scripts/custom-ai-smoke.mjs && node scripts/smoke.mjs && node scripts/tray-smoke.mjs && node scripts/session-migration-smoke.mjs",
     "test:update:mac": "tsc -p tsconfig.test.json && node scripts/test-mac-update.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

@@ -48,8 +48,11 @@
   const cards = new Map()
   const values = [
     ['fiveHour', '5h', '5 小时窗口'],
-    ['weekly', '周', '7 天窗口']
+    ['weekly', '周', '7 天窗口'],
+    ['monthly', '月', '月度窗口']
   ]
+  const hasWindow = (w) =>
+    !!w && [w.limit, w.used, w.remaining].some((v) => typeof v === 'number' && Number.isFinite(v))
   const percent = (w, checkedAt) => {
     if (
       !w ||
@@ -148,7 +151,8 @@
       return
     }
     $('.account-name').textContent = `${provider(a)} · ${a.name}` + (a.enabled ? '' : '（已停用）')
-    $('.details').innerHTML = (a.monthly ? [...values, ['monthly', '月', '月度窗口']] : values)
+    $('.details').innerHTML = values
+      .filter(([key]) => hasWindow(a[key]))
       .map(([key, , label]) => {
         const p = stale() ? null : percent(a[key], a.checkedAt)
         const time = Date.parse(a[key]?.resetAt || '')
@@ -163,7 +167,7 @@
         return `<div class="row"><div class="labels"><span>${label}</span><strong>${p === null ? '等待更新' : '剩余 ' + Math.round(p) + '%'}</strong></div>${meter(p, true)}<div class="reset">${reset}</div></div>`
       })
       .join('')
-    if (a.provider === 'deepseek') {
+    if (a.balance?.balances?.length) {
       $('.details').replaceChildren()
       const row = document.createElement('p')
       row.textContent = '按量付费余额：' + balanceText(a)
@@ -187,7 +191,7 @@
     if (!accounts.length) {
       const empty = document.createElement('span')
       empty.className = 'empty'
-      empty.textContent = failed ? '等待 Navo 连接' : '暂无已启用账号'
+      empty.textContent = failed ? '等待 Navo 连接' : '暂无可展示额度的账号'
       $('.accounts').append(empty)
     }
     accounts.forEach((a, index) => {
@@ -218,12 +222,13 @@
       button.setAttribute('aria-label', `查看 ${a.name} 额度`)
       button.title = `${provider(a)} · ${a.name}${a.enabled ? '' : '（已停用）'} · 剩余额度 · 点击查看详情`
       button.querySelector('.stats').innerHTML = values
+        .filter(([key]) => hasWindow(a[key]))
         .map(([key, label]) => {
           const p = stale() ? null : percent(a[key], a.checkedAt)
           return `<span class="stat"><span class="muted">${label}</span>${meter(p)}<span>${p === null ? '—' : Math.round(p) + '%'}</span></span>`
         })
         .join('')
-      if (a.provider === 'deepseek') button.querySelector('.stats').textContent = balanceText(a)
+      if (a.balance?.balances?.length) button.querySelector('.stats').textContent = balanceText(a)
     })
     if (!$('.panel').hidden) details()
     position()
@@ -235,7 +240,14 @@
       const next = await r.json()
       if (!Array.isArray(next.accounts)) throw new Error('invalid data')
       disabled = next.enabled === false
-      data = { ...next, accounts: next.accounts.filter((a) => a.enabled === true) }
+      data = {
+        ...next,
+        accounts: next.accounts.filter(
+          (a) =>
+            a.enabled === true &&
+            (values.some(([key]) => hasWindow(a[key])) || a.balance?.balances?.length)
+        )
+      }
       failed = false
     } catch {
       failed = true

@@ -8,6 +8,7 @@ import {
   DEFAULT_ACCOUNT_CONCURRENCY,
   PROVIDERS,
   accountBaseUrl,
+  normalizeCustomBaseUrl,
   type Provider,
   type ModelPrice,
   type ModelProtocol,
@@ -101,6 +102,12 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
   const v = object(value)
   const provider = validateProvider(v.provider)
   if (
+    provider === 'custom' &&
+    v.modelSource !== undefined &&
+    !['automatic', 'manual'].includes(v.modelSource as string)
+  )
+    throw new Error('模型来源无效')
+  if (
     v.kind !== (provider === 'codex' ? 'oauth' : 'api-key') &&
     !(provider === 'kimi' && v.kind === 'oauth')
   )
@@ -136,6 +143,12 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
       ? { kimiOAuthOnly: boolean(v.kimiOAuthOnly) }
       : {}),
     provider,
+    ...(provider === 'custom'
+      ? {
+          baseUrl: normalizeCustomBaseUrl(v.baseUrl),
+          modelSource: (v.modelSource ?? 'automatic') as 'automatic' | 'manual'
+        }
+      : {}),
     ...(v.modelProtocols !== undefined
       ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
       : {}),
@@ -206,7 +219,8 @@ export function capabilityFields(
   concurrencyOverride: number | null = null,
   provider: Provider = 'kimi',
   excludedModels: string[] = [],
-  manualModels: string[] = []
+  manualModels: string[] = [],
+  baseUrl?: string
 ) {
   if (concurrencyOverride !== null) integer(concurrencyOverride, 1, 1000, '手动并发上限')
   let capabilities: AccountCapabilities | null = null
@@ -235,7 +249,7 @@ export function capabilityFields(
     }
   }
   return {
-    baseUrl: accountBaseUrl(region, provider),
+    baseUrl: accountBaseUrl(region, provider, baseUrl),
     models: [...new Set([...(capabilities?.models ?? []), ...manualModels])].filter(
       (model) => !excludedModels.includes(model)
     ),
@@ -332,7 +346,8 @@ export class GatewayStore {
             input.concurrencyOverride,
             input.provider,
             input.excludedModels,
-            input.manualModels
+            input.manualModels,
+            input.baseUrl
           ),
           id: string(item.id, '账号 ID'),
           credential: {
@@ -461,6 +476,8 @@ export class GatewayStore {
       const unchanged =
         old?.provider === input.provider &&
         old?.region === input.region &&
+        (input.provider !== 'custom' ||
+          (old.baseUrl === input.baseUrl && old.modelSource === input.modelSource)) &&
         old.credential.accessToken === nextCredential.accessToken
       const modelProtocols =
         input.modelProtocols ?? (old?.provider === input.provider ? old?.modelProtocols : undefined)
@@ -486,7 +503,8 @@ export class GatewayStore {
             : input.concurrencyOverride,
           input.provider,
           excludedModels,
-          manualModels
+          manualModels,
+          input.baseUrl
         )
       }
       if (old) data.accounts[data.accounts.indexOf(old)] = account

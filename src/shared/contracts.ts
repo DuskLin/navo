@@ -74,7 +74,7 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
-export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex', 'minimax'] as const
+export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex', 'minimax', 'custom'] as const
 export type Provider = (typeof PROVIDERS)[number]
 export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
@@ -89,6 +89,8 @@ export interface Membership {
 export interface AccountInput {
   /** 旧配置缺省为 Kimi。 */
   provider?: Provider
+  baseUrl?: string
+  modelSource?: 'automatic' | 'manual'
   id?: string
   name: string
   kind: 'api-key' | 'oauth'
@@ -114,6 +116,7 @@ export interface AccountView extends Omit<AccountInput, 'secret' | 'id'> {
 }
 export interface AccountProbe {
   provider?: Provider
+  baseUrl?: string
   id?: string
   region: Region
   secret?: string
@@ -155,19 +158,50 @@ export interface AccountBalance {
   available: boolean
   balances: { currency: string; balance: number }[]
 }
-export function accountBaseUrl(region: Region, provider: Provider = 'kimi'): string {
+/** Base URL includes the API prefix (for example /v1); preserve custom paths. */
+export function normalizeCustomBaseUrl(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2048)
+    throw new Error('请填写有效的上游 Base URL')
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error('上游 Base URL 格式无效')
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    throw new Error('上游 Base URL 须为 HTTP 或 HTTPS 地址，且不能包含凭据、查询参数或片段')
+  return url.toString().replace(/\/+$/, '')
+}
+export function accountBaseUrl(
+  region: Region,
+  provider: Provider = 'kimi',
+  baseUrl?: string
+): string {
+  if (provider === 'custom') return normalizeCustomBaseUrl(baseUrl)
   if (provider === 'minimax')
     return region === 'global' ? 'https://api.minimax.io/v1' : 'https://api.minimaxi.com/v1'
   if (provider === 'codex') return 'https://chatgpt.com/backend-api/codex'
   if (provider === 'opencode-go') return 'https://opencode.ai/zen/go/v1'
   return provider === 'deepseek' ? 'https://api.deepseek.com/v1' : kimiBaseUrl(region)
 }
-export function upstreamUrl(region: Region, provider: Provider = 'kimi', route: string): string {
+export function upstreamUrl(
+  region: Region,
+  provider: Provider = 'kimi',
+  route: string,
+  baseUrl?: string
+): string {
   if (provider === 'minimax' && route.startsWith('/v1/messages'))
     return `${accountBaseUrl(region, provider).slice(0, -3)}/anthropic${route}`
   if (provider === 'deepseek' && route === '/v1/messages')
     return 'https://api.deepseek.com/anthropic/v1/messages'
-  return `${accountBaseUrl(region, provider)}${route.slice(3)}`
+  return `${accountBaseUrl(region, provider, baseUrl)}${route.slice(3)}`
 }
 export function kimiBaseUrl(region: Region): string {
   return region === 'global' ? 'https://api.kimi.ai/coding/v1' : 'https://api.kimi.com/coding/v1'

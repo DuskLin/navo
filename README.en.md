@@ -47,15 +47,15 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 
 ## Supported providers
 
-| Provider    | Account type                                 | Synced information                                            |
-| ----------- | -------------------------------------------- | ------------------------------------------------------------- |
-| Kimi Code   | China / international API key or local OAuth | Models, 5-hour / 7-day quotas, concurrency limit              |
-| DeepSeek    | Platform API key, pay as you go              | Models and balances per currency, without currency conversion |
-| MiniMax     | Token Plan Subscription Key (China / Global) | Models, 5-hour / weekly remaining quota and reset times       |
-| Codex       | Local ChatGPT OAuth login | Models, remaining quota and reset times, automatic token refresh |
-| OpenCode Go | API key with an active Go subscription       | Models and 5-hour / weekly / monthly quota windows            |
+| Provider    | Account type                                 | Synced information                                               |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| Kimi Code   | China / international API key or local OAuth | Models, 5-hour / 7-day quotas, concurrency limit                 |
+| DeepSeek    | Platform API key, pay as you go              | Models and balances per currency, without currency conversion    |
+| MiniMax     | Token Plan Subscription Key (China / Global) | Models, 5-hour / weekly remaining quota and reset times          |
+| Codex       | Local ChatGPT OAuth login                    | Models, remaining quota and reset times, automatic token refresh |
+| OpenCode Go | API key with an active Go subscription       | Models and 5-hour / weekly / monthly quota windows               |
 
-The app uses fixed upstream addresses and fetches model lists from each provider. OpenCode Zen pay-as-you-go accounts are outside the current scope. Protocol availability depends on the provider and model; checking a protocol in the app does not add upstream support for it.
+Built-in providers use predefined endpoints. Choose “自定义供应商 · API Key” to configure a Base URL (including an API prefix such as `/v1`) and Key. Fetch models automatically from `/models`, or use manual mode when discovery is unavailable. Manual model IDs can be added in bulk, separated by newlines or commas, and survive refreshes. Custom services default to Chat Completions; adjust each model’s protocols to match the service. OpenCode Zen pay-as-you-go accounts are outside the current scope. Protocol availability depends on the provider and model; checking a protocol in the app does not add upstream support for it.
 
 ### Local Codex authentication and manual models
 

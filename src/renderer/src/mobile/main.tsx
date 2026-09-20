@@ -1,3 +1,4 @@
+import { hasQuotaWindow } from '../../../shared/quota-display'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
@@ -59,14 +60,18 @@ function Identity({ account }: { account: DashboardAccount }) {
   return (
     <div className="identity">
       <span className={`provider-logo ${account.provider.toLowerCase()}`}>
-        <img
-          src={
-            { Kimi: kimi, DeepSeek: deepseek, Go: go, MiniMax: minimax, Codex: openai }[
-              account.provider
-            ]
-          }
-          alt=""
-        />
+        {account.provider === '自定义供应商' ? (
+          <span>AI</span>
+        ) : (
+          <img
+            src={
+              { Kimi: kimi, DeepSeek: deepseek, Go: go, MiniMax: minimax, Codex: openai }[
+                account.provider
+              ]
+            }
+            alt=""
+          />
+        )}
       </span>
       <div>
         <h3>{account.name}</h3>
@@ -84,6 +89,7 @@ function Meter({
   label: string
   now: number
 }) {
+  if (!hasQuotaWindow(value)) return null
   const remaining = percent(value)
   return (
     <div className={`meter ${remaining !== null && remaining < 15 ? 'low' : ''}`}>
@@ -379,69 +385,72 @@ function App({
               <Badge low={label(account) !== '可用'}>{label(account)}</Badge>
             </div>
             <div className="detail-grid">
-              <section className="panel quota-hero">
-                <div className="section-title">
-                  <h2>{account.provider !== 'DeepSeek' ? '5 小时额度' : '账户余额'}</h2>
-                  <span className="subtle">
-                    {account.provider !== 'DeepSeek' ? '当前窗口' : '按量付费'}
-                  </span>
-                </div>
-                {account.provider !== 'DeepSeek' ? (
-                  <>
-                    <div
-                      className={`quota-ring ${(percent(account.quota?.fiveHour) ?? 100) < 15 ? 'low' : ''}`}
-                      style={
-                        {
-                          '--remaining': `${(percent(account.quota?.fiveHour) ?? 0) * 3.6}deg`
-                        } as React.CSSProperties
-                      }
-                    >
-                      <div>
-                        <strong>
-                          {percent(account.quota?.fiveHour) ?? '—'}
-                          <small>%</small>
-                        </strong>
-                        <span>剩余额度</span>
-                      </div>
-                    </div>
-                    <div className="reset-row">
-                      <span>下次重置</span>
-                      <div>
-                        <strong>
-                          {account.quota?.fiveHour?.resetAt
-                            ? new Date(account.quota?.fiveHour.resetAt).toLocaleString('zh-CN', {
-                                month: 'numeric',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })
-                            : '未知'}
-                        </strong>
-                        <p>{countdown(account.quota?.fiveHour, now)}</p>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="balance-hero">
-                    <span>可用余额</span>
-                    {account.balance?.balances.length ? (
-                      account.balance.balances.map((balance) => (
-                        <strong key={balance.currency}>
-                          {balance.currency} {balance.balance.toFixed(2)}
-                        </strong>
-                      ))
-                    ) : (
-                      <strong>—</strong>
-                    )}
-                    <p>各币种独立展示，不进行汇率换算</p>
+              {(hasQuotaWindow(account.quota?.fiveHour) || !!account.balance?.balances.length) && (
+                <section className="panel quota-hero">
+                  <div className="section-title">
+                    <h2>{!account.balance?.balances.length ? '5 小时额度' : '账户余额'}</h2>
+                    <span className="subtle">
+                      {!account.balance?.balances.length ? '当前窗口' : '按量付费'}
+                    </span>
                   </div>
-                )}
-              </section>
+                  {!account.balance?.balances.length ? (
+                    <>
+                      <div
+                        className={`quota-ring ${(percent(account.quota?.fiveHour) ?? 100) < 15 ? 'low' : ''}`}
+                        style={
+                          {
+                            '--remaining': `${(percent(account.quota?.fiveHour) ?? 0) * 3.6}deg`
+                          } as React.CSSProperties
+                        }
+                      >
+                        <div>
+                          <strong>
+                            {percent(account.quota?.fiveHour) ?? '—'}
+                            <small>%</small>
+                          </strong>
+                          <span>剩余额度</span>
+                        </div>
+                      </div>
+                      <div className="reset-row">
+                        <span>下次重置</span>
+                        <div>
+                          <strong>
+                            {account.quota?.fiveHour?.resetAt
+                              ? new Date(account.quota?.fiveHour.resetAt).toLocaleString('zh-CN', {
+                                  month: 'numeric',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })
+                              : '未知'}
+                          </strong>
+                          <p>{countdown(account.quota?.fiveHour, now)}</p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="balance-hero">
+                      <span>可用余额</span>
+                      {account.balance?.balances.length ? (
+                        account.balance.balances.map((balance) => (
+                          <strong key={balance.currency}>
+                            {balance.currency} {balance.balance.toFixed(2)}
+                          </strong>
+                        ))
+                      ) : (
+                        <strong>—</strong>
+                      )}
+                      <p>各币种独立展示，不进行汇率换算</p>
+                    </div>
+                  )}
+                </section>
+              )}
               <div className="detail-secondary">
-                {account.quota && (
+                {(hasQuotaWindow(account.quota?.weekly) ||
+                  hasQuotaWindow(account.quota?.monthly)) && (
                   <section className="panel window-panel">
-                    <Meter value={account.quota.weekly} label="本周剩余额度" now={now} />
-                    {account.quota.monthly && (
+                    <Meter value={account.quota?.weekly} label="本周剩余额度" now={now} />
+                    {account.quota?.monthly && (
                       <Meter value={account.quota.monthly} label="本月剩余额度" now={now} />
                     )}
                   </section>
@@ -554,7 +563,7 @@ function App({
                       <ChevronRight size={17} />
                     </div>
                   </div>
-                  {a.provider !== 'DeepSeek' ? (
+                  {!a.balance?.balances.length ? (
                     <div className="quota-columns">
                       <Meter label="5 小时剩余" value={a.quota?.fiveHour} now={now} />
                       <Meter label="本周剩余" value={a.quota?.weekly} now={now} />

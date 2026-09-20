@@ -80,7 +80,8 @@ export async function testAccountModel(
       upstreamUrl(
         input.region,
         input.provider,
-        MODEL_PROTOCOLS.find((p) => p.value === input.protocol)!.route
+        MODEL_PROTOCOLS.find((p) => p.value === input.protocol)!.route,
+        input.baseUrl
       ),
       {
         method: 'POST',

@@ -14,6 +14,7 @@ import { lanAddresses, isPrivateIPv4 } from './lan-addresses'
 import { pipeline } from 'node:stream/promises'
 import {
   upstreamUrl,
+  normalizeCustomBaseUrl,
   type AccountCapabilities,
   type AccountModelTestResult,
   type GatewaySnapshot,
@@ -340,16 +341,33 @@ export class Gateway {
     const key = input.secret || old?.credential.accessToken
     if (!key) throw new Error('请填写 API Key')
     const needsRefresh =
+      input.provider === 'custom' ||
       !old?.capabilities ||
       old.capabilities.quota === undefined ||
       old.region !== input.region ||
       old.provider !== input.provider ||
       old.credential.accessToken !== key
-    const capabilities = needsRefresh
-      ? await this.capabilities.get(input.region, key, false, input.provider)
-      : old.capabilities!
+    const capabilities =
+      input.provider === 'custom' && input.modelSource === 'manual'
+        ? { models: [], maxConcurrency: null, checkedAt: Date.now(), warning: '', quota: null }
+        : needsRefresh
+          ? await this.capabilities.get(
+              input.region,
+              key,
+              false,
+              input.provider,
+              undefined,
+              undefined,
+              input.baseUrl
+            )
+          : old.capabilities!
     const id = await this.store.saveAccount(input, capabilities, key)
-    if (input.secret || !input.id) this.scheduler.reset(id)
+    if (
+      input.secret ||
+      !input.id ||
+      (input.provider === 'custom' && old?.baseUrl !== input.baseUrl)
+    )
+      this.scheduler.reset(id)
     this.scheduler.prune(this.store.get().accounts)
     return this.snapshot()
   }
@@ -373,7 +391,15 @@ export class Gateway {
     }
     const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
-    return this.capabilities.get(input.region as Region, key, false, provider)
+    return this.capabilities.get(
+      input.region as Region,
+      key,
+      true,
+      provider,
+      undefined,
+      undefined,
+      provider === 'custom' ? normalizeCustomBaseUrl(input.baseUrl ?? old?.baseUrl) : undefined
+    )
   }
   private recordRequest(record: RequestRecord): void {
     try {
@@ -423,15 +449,18 @@ export class Gateway {
             }
     if (!credential.accessToken || /[\s\x00-\x1f\x7f]/.test(credential.accessToken))
       throw new Error('请填写有效的 API Key')
+    const baseUrl =
+      provider === 'custom' ? normalizeCustomBaseUrl(input.baseUrl ?? old?.baseUrl) : undefined
     const started = Date.now()
     const sameAccount =
       old &&
       old.provider === provider &&
       old.region === input.region &&
+      (provider !== 'custom' || old.baseUrl === baseUrl) &&
       (provider === 'codex' || old.credential.accessToken === credential.accessToken)
     const draftName = typeof input.name === 'string' ? input.name.trim().slice(0, 200) : ''
     return testAccountModel(
-      { model, protocol, provider, region: input.region as Region },
+      { model, protocol, provider, region: input.region as Region, baseUrl },
       credential,
       this.request,
       (telemetry) =>
@@ -453,6 +482,7 @@ export class Gateway {
     const id = string(value, '账号 ID')
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
+    if (old.provider === 'custom' && old.modelSource === 'manual') return this.snapshot()
     const credential =
       old.provider === 'codex'
         ? await this.codex.credential(old.id)
@@ -469,7 +499,9 @@ export class Gateway {
               old.credential.accessToken,
               true,
               old.provider,
-              signal
+              signal,
+              undefined,
+              old.baseUrl
             )
     signal?.throwIfAborted()
     await this.store.mutate((data) => {
@@ -479,6 +511,8 @@ export class Gateway {
         !account ||
         account.region !== old.region ||
         account.provider !== old.provider ||
+        account.baseUrl !== old.baseUrl ||
+        account.modelSource !== old.modelSource ||
         account.credential.accessToken !== credential.accessToken
       )
         throw new Error('账号已变更，请重新同步')
@@ -501,7 +535,8 @@ export class Gateway {
           account.concurrencyOverride,
           account.provider,
           account.excludedModels,
-          account.manualModels
+          account.manualModels,
+          account.baseUrl
         )
       )
     })
@@ -850,7 +885,7 @@ export class Gateway {
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           upstreamRoute = targetRoute
           const upstream = await this.request(
-            `${upstreamUrl(account.region, account.provider, targetRoute)}${url.search}`,
+            `${upstreamUrl(account.region, account.provider, targetRoute, account.baseUrl)}${url.search}`,
             {
               method: req.method,
               headers,

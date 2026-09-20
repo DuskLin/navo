@@ -97,18 +97,55 @@ test('页面被其他补丁修改后，关闭只移除自己的标记', async ()
   }
 })
 
-test('全部供应商进入展示快照，凭据不进入导出', () => {
+test('仅有额度或余额的账号进入展示快照，零额度保留且凭据不进入导出', () => {
   const accounts = ['kimi', 'opencode-go', 'deepseek'].map((provider) => ({
     id: provider,
     name: provider,
     provider: provider as 'kimi' | 'opencode-go' | 'deepseek',
     enabled: true,
-    capabilities: null,
+    capabilities: {
+      models: [],
+      maxConcurrency: null,
+      checkedAt: Date.now(),
+      warning: '',
+      quota: {
+        fiveHour: { limit: 100, used: 100, remaining: 0, resetAt: null },
+        weekly: null,
+        total: null,
+        totalUnlimited: false
+      }
+    },
     credential: { accessToken: 'PRIVATE_TOKEN' },
     secret: 'PRIVATE_SECRET'
   }))
-  const data = quotaDisplaySnapshot(accounts)
-  assert.equal(data.accounts.length, 3)
+  const data = quotaDisplaySnapshot([
+    ...accounts,
+    { ...accounts[0], id: 'no-data', capabilities: null },
+    {
+      ...accounts[0],
+      id: 'empty-quota',
+      capabilities: {
+        ...accounts[0].capabilities,
+        quota: {
+          ...accounts[0].capabilities.quota,
+          fiveHour: { limit: null, used: null, remaining: null, resetAt: null }
+        }
+      }
+    },
+    {
+      ...accounts[0],
+      id: 'balance-only',
+      capabilities: {
+        ...accounts[0].capabilities,
+        quota: null,
+        balance: { available: false, balances: [{ currency: 'USD', balance: 0 }] }
+      }
+    }
+  ])
+  assert.deepEqual(
+    data.accounts.map((a) => a.id),
+    ['kimi', 'opencode-go', 'deepseek', 'balance-only']
+  )
   assert.ok(!JSON.stringify(data).includes('PRIVATE'))
 })
 

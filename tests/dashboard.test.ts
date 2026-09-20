@@ -262,7 +262,12 @@ test('dashboard source projects only safe data and preserves user account names'
     }
   }
   const gateway = {
-    store: { get: () => ({ accounts: [account], quotaCardOrder: ['account-1'] }) },
+    store: {
+      get: () => ({
+        accounts: [account, { ...account, id: 'no-quota', capabilities: null }],
+        quotaCardOrder: ['account-1']
+      })
+    },
     scheduler: { state: () => ({ active: 2, authFailed: false }) }
   } as unknown as Gateway
   const usage = {
@@ -274,6 +279,8 @@ test('dashboard source projects only safe data and preserves user account names'
   } as unknown as UsageService
   const source = dashboardSource(gateway, usage)
   const result = await source()
+  assert.equal(result.accounts.length, 1)
+  assert.equal(result.totals.active, 4)
   assert.equal(result.accounts[0].name, account.name)
   assert.equal(result.accounts[0].quota?.fiveHour?.remaining, 80)
   assert.equal(result.accounts[0].requests, 3)

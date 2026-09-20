@@ -2761,7 +2761,8 @@ input.account-policy-switch[role='switch']:checked::after,
   display: flex;
   gap: 8px;
 }
-.manual-model-controls input {
+.manual-model-controls textarea {
+  resize: vertical;
   flex: 1;
   min-width: 0;
 }

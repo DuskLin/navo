@@ -44,6 +44,7 @@ test('prices persist independently by provider, survive account refresh, and mig
         await store.saveAccount(
           {
             name: provider,
+            ...(provider === 'custom' ? { baseUrl: 'https://custom.example/v1' } : {}),
             provider,
             kind: 'api-key',
             region: 'mainland-cn',
@@ -108,6 +109,7 @@ test('所有供应商的单价均可保存和重启恢复，包含 Codex OAuth',
         {
           provider: provider === 'codex' ? 'kimi' : provider,
           name: provider,
+          ...(provider === 'custom' ? { baseUrl: 'https://custom.example/v1' } : {}),
           kind: 'api-key',
           region: 'global',
           enabled: true,

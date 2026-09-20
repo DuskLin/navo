@@ -3,7 +3,7 @@ import type { AccountBalance, AccountQuota } from './contracts'
 export interface DashboardAccount {
   id: string
   name: string
-  provider: 'Kimi' | 'DeepSeek' | 'Go' | 'MiniMax' | 'Codex'
+  provider: 'Kimi' | 'DeepSeek' | 'Go' | 'MiniMax' | 'Codex' | '自定义供应商'
   quota: AccountQuota | null
   balance?: AccountBalance
   requests: number

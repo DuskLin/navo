@@ -10,7 +10,7 @@ import {
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AccountInput } from '../src/shared/contracts'
+import { normalizeCustomBaseUrl, upstreamUrl, type AccountInput } from '../src/shared/contracts'
 import {
   GatewayStore,
   capabilityFields,
@@ -2792,6 +2792,152 @@ test('MiniMax clean EOF keeps successful requests schedulable and requests separ
       assert.equal(gateway.snapshot().requests[0].interruption, null)
       assert.equal(gateway.scheduler.state(f.store.get().accounts[0].id).cooldownUntil, 0)
     }
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('custom endpoints validate URLs and preserve API prefixes', () => {
+  assert.equal(
+    normalizeCustomBaseUrl(' https://example.com/proxy/v1/// '),
+    'https://example.com/proxy/v1'
+  )
+  assert.equal(
+    upstreamUrl('global', 'custom', '/v1/chat/completions', 'http://localhost:1234/api/'),
+    'http://localhost:1234/api/chat/completions'
+  )
+  for (const value of [
+    '',
+    'example.com',
+    'file:///tmp/key',
+    'https://user:pass@example.com',
+    'https://example.com?key=secret',
+    'https://example.com#fragment'
+  ])
+    assert.throws(() => normalizeCustomBaseUrl(value))
+})
+
+test('custom automatic models isolate caches by URL and preserve manual additions after refresh and restart', async () => {
+  const f = await storeFixture()
+  const calls: string[] = []
+  const gateway = f.createGateway(
+    undefined,
+    async (url, init) => {
+      calls.push(String(url))
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer shared-key')
+      assert.ok(String(url).endsWith('/models'))
+      return Response.json({
+        data: [{ id: String(url).includes('first') ? 'first-model' : 'second-model' }]
+      })
+    },
+    async () => Response.json({})
+  )
+  try {
+    const input: AccountInput = {
+      ...accountInput('custom'),
+      provider: 'custom',
+      baseUrl: 'https://first.example/v1/',
+      secret: 'shared-key',
+      manualModels: ['manual-model']
+    }
+    await gateway.saveAccount(input)
+    let saved = f.store.get().accounts[0]
+    assert.equal(saved.baseUrl, 'https://first.example/v1')
+    assert.deepEqual(saved.models, ['first-model', 'manual-model'])
+    await gateway.saveAccount({ ...saved, baseUrl: 'https://second.example/api' })
+    saved = f.store.get().accounts[0]
+    assert.deepEqual(saved.models, ['second-model', 'manual-model'])
+    await gateway.refreshAccount(saved.id)
+    const restored = new GatewayStore(f.file, f.secrets)
+    await restored.load()
+    assert.equal(restored.get().accounts[0].baseUrl, 'https://second.example/api')
+    assert.deepEqual(restored.get().accounts[0].models, ['second-model', 'manual-model'])
+    assert.deepEqual(calls, [
+      'https://first.example/v1/models',
+      'https://second.example/api/models',
+      'https://second.example/api/models'
+    ])
+    assert.ok(!(await readFile(f.file, 'utf8')).includes('shared-key'))
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('custom manual accounts save, reload, test and forward without a model discovery endpoint', async () => {
+  const f = await storeFixture()
+  let metadataCalls = 0
+  const calls: string[] = []
+  const gateway = f.createGateway(
+    async (url, init) => {
+      calls.push(String(url))
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret-custom')
+      assert.equal(JSON.parse(await new Response(init?.body).text()).model, 'manual-model')
+      return Response.json({
+        choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }]
+      })
+    },
+    async () => {
+      metadataCalls++
+      return new Response('', { status: 404 })
+    },
+    async () => Response.json({})
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({
+      ...accountInput('custom'),
+      provider: 'custom',
+      baseUrl: 'http://localhost:1234/proxy/v1',
+      modelSource: 'manual',
+      manualModels: ['manual-model']
+    })
+    const saved = f.store.get().accounts[0]
+    await gateway.refreshAccount(saved.id)
+    const restored = new GatewayStore(f.file, f.secrets)
+    await restored.load()
+    assert.equal(restored.get().accounts[0].modelSource, 'manual')
+    assert.deepEqual(restored.get().accounts[0].models, ['manual-model'])
+    const result = await gateway.testAccountModel({
+      id: saved.id,
+      region: saved.region,
+      model: 'manual-model',
+      protocol: 'chat-completions'
+    })
+    assert.equal(result.text, 'OK')
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const response = await fetch(`${reserved.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${f.store.get().groups[0].key}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ model: 'manual-model', messages: [{ role: 'user', content: 'test' }] })
+    })
+    assert.equal(
+      response.status,
+      200,
+      JSON.stringify({ calls, account: gateway.snapshot().accounts[0] })
+    )
+    assert.equal((await response.json()).choices[0].message.content, 'OK')
+    assert.deepEqual(calls, [
+      'http://localhost:1234/proxy/v1/chat/completions',
+      'http://localhost:1234/proxy/v1/chat/completions'
+    ])
+    assert.equal(metadataCalls, 0)
+    await gateway
+      .saveAccount({
+        ...saved,
+        modelSource: 'automatic',
+        baseUrl: 'https://automatic.example/v1',
+        secret: 'new-key'
+      })
+      .then(
+        () => assert.fail('automatic mode must report discovery failure'),
+        () => {}
+      )
+    assert.equal(f.store.get().accounts[0].modelSource, 'manual')
   } finally {
     await f.cleanup()
   }

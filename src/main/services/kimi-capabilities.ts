@@ -69,21 +69,24 @@ export class KimiCapabilities {
     force = false,
     provider: Provider = 'kimi',
     signal?: AbortSignal,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    baseUrl?: string
   ): Promise<AccountCapabilities> {
     // A cancellable background refresh must not cancel a shared foreground probe.
     if (signal || headers) {
       signal?.throwIfAborted()
-      const result = await this.fetch(region, key, provider, signal, headers)
+      const result = await this.fetch(region, key, provider, signal, headers, baseUrl)
       signal?.throwIfAborted()
       return structuredClone(result)
     }
-    const fingerprint = createHash('sha256').update(`${provider}\0${region}\0${key}`).digest('hex')
+    const fingerprint = createHash('sha256')
+      .update(`${provider}\0${region}\0${baseUrl ?? ''}\0${key}`)
+      .digest('hex')
     const cached = this.cache.get(fingerprint)
     if (!force && cached && Date.now() - cached.checkedAt < 60000) return structuredClone(cached)
     let work = this.pending.get(fingerprint)
     if (!work) {
-      work = this.fetch(region, key, provider)
+      work = this.fetch(region, key, provider, undefined, undefined, baseUrl)
       this.pending.set(fingerprint, work)
     }
     try {
@@ -153,9 +156,10 @@ export class KimiCapabilities {
     key: string,
     provider: Provider,
     parentSignal?: AbortSignal,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    baseUrl?: string
   ): Promise<AccountCapabilities> {
-    const base = accountBaseUrl(region, provider)
+    const base = accountBaseUrl(region, provider, baseUrl)
     const timeout = AbortSignal.timeout(15000)
     const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout
     const models: string[] = []
@@ -181,28 +185,30 @@ export class KimiCapabilities {
     let balance = null
     // 无论模型接口是否报告并发，都查询用量，以同步真实额度及 parallel.limit。
     try {
-      const usage = await this.read(
-        provider === 'deepseek'
-          ? 'https://api.deepseek.com/user/balance'
-          : provider === 'minimax'
-            ? `${base}/api/openplatform/coding_plan/remains`
-            : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
-        key,
-        signal,
-        provider === 'deepseek' ? '余额' : '额度与并发信息',
-        headers
-      )
-      const limit = reportedConcurrency(usage.data, usage.headers)
-      if (limit !== null) concurrency.push(limit)
-      if (provider === 'deepseek') balance = parseDeepSeekBalance(usage.data)
-      else {
-        quota =
-          provider === 'minimax'
-            ? parseMiniMaxQuota(usage.data)
-            : provider === 'opencode-go'
-              ? parseOpenCodeGoQuota(usage.data)
-              : parseKimiQuota(usage.data)
-        if (!quota) warning = '上游未返回额度数据'
+      if (provider !== 'custom') {
+        const usage = await this.read(
+          provider === 'deepseek'
+            ? 'https://api.deepseek.com/user/balance'
+            : provider === 'minimax'
+              ? `${base}/api/openplatform/coding_plan/remains`
+              : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
+          key,
+          signal,
+          provider === 'deepseek' ? '余额' : '额度与并发信息',
+          headers
+        )
+        const limit = reportedConcurrency(usage.data, usage.headers)
+        if (limit !== null) concurrency.push(limit)
+        if (provider === 'deepseek') balance = parseDeepSeekBalance(usage.data)
+        else {
+          quota =
+            provider === 'minimax'
+              ? parseMiniMaxQuota(usage.data)
+              : provider === 'opencode-go'
+                ? parseOpenCodeGoQuota(usage.data)
+                : parseKimiQuota(usage.data)
+          if (!quota) warning = '上游未返回额度数据'
+        }
       }
     } catch (error) {
       // 套餐接口的业务错误及鉴权失败必须阻止保存无效密钥。

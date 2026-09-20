@@ -11,6 +11,7 @@ export function defaultModelProtocols(
   provider: AccountInput['provider'],
   model: string
 ): ModelProtocol[] {
+  if (provider === 'custom') return ['chat-completions']
   if (provider === 'codex') return ['responses']
   return provider === 'opencode-go'
     ? [MODEL_PROTOCOLS.find((p) => p.route === openCodeGoRoute(model))!.value]

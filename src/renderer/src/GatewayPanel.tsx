@@ -1,3 +1,4 @@
+import { hasQuotaDisplay, hasQuotaWindow } from '../../shared/quota-display'
 import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import codexLogo from './assets/models/openai.svg'
 import { Modal } from './Modal'
@@ -339,6 +340,7 @@ function PerformanceHistory({
   )
 }
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
+  if (provider === 'custom') return <span aria-label="自定义供应商">AI</span>
   if (provider === 'codex')
     return <img className="openai-logo" src={codexLogo} width={20} height={20} alt="Codex" />
   if (provider === 'minimax')
@@ -491,6 +493,9 @@ function QuotaDetails({
   onSnapshot?: (snapshot: GatewaySnapshot) => void
 }) {
   const [managing, setManaging] = useState<QuotaCycleQuery['window']>()
+  const hasWindows = [quota?.fiveHour, quota?.weekly, quota?.monthly].some(hasQuotaWindow)
+  if (!hasWindows && (overview || (!loading && !quota?.total && !quota?.totalUnlimited)))
+    return null
   return (
     <section className="quota-details" aria-label="账号额度">
       {!overview && (
@@ -508,6 +513,7 @@ function QuotaDetails({
               : [])
           ] as const
         ).map(([label, window, estimate], index) => {
+          if (!hasQuotaWindow(window)) return null
           const amount = overview ? window?.remaining : window?.used
           const percent =
             window?.limit && amount != null
@@ -895,7 +901,7 @@ export function GatewayPanel({
   }
   const savedCardOrder = new Map((snapshot?.quotaCardOrder ?? []).map((id, index) => [id, index]))
   const cardIds = (snapshot?.accounts ?? [])
-    .filter((account) => account.hasCredential)
+    .filter((account) => account.hasCredential && hasQuotaDisplay(account.capabilities))
     .sort((a, b) => (savedCardOrder.get(a.id) ?? Infinity) - (savedCardOrder.get(b.id) ?? Infinity))
     .map((account) => account.id)
   const cardDrag = useQuotaCardDrag(
@@ -933,7 +939,7 @@ export function GatewayPanel({
     )
   const order = new Map(cardDrag.order.map((id, index) => [id, index]))
   const linkedAccounts = snapshot.accounts
-    .filter((account) => account.hasCredential)
+    .filter((account) => account.hasCredential && hasQuotaDisplay(account.capabilities))
     .sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity))
   const moveCard = (from: string, to: string) => {
     const ids = linkedAccounts.map((account) => account.id)
@@ -1025,7 +1031,7 @@ export function GatewayPanel({
           {!linkedAccounts.length ? (
             <div className="quota-overview-empty">
               <Users size={24} />
-              <p>关联账号后，这里会展示 Kimi、MiniMax、OpenCode Go 剩余额度和 DeepSeek 余额。</p>
+              <p>暂无可展示的额度或余额，账号仍可在账号管理中使用。</p>
               <button
                 className="text-button"
                 onClick={() => {
@@ -1369,13 +1375,15 @@ export function GatewayPanel({
                                         <small>
                                           {account.provider === 'codex'
                                             ? 'Codex · 本地认证'
-                                            : account.provider === 'minimax'
-                                              ? `MiniMax · Token Plan · ${account.region === 'global' ? '国际区' : '中国区'}`
-                                              : account.provider === 'opencode-go'
-                                                ? 'OpenCode Go · 订阅'
-                                                : account.provider === 'deepseek'
-                                                  ? 'DeepSeek · 按量付费'
-                                                  : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
+                                            : account.provider === 'custom'
+                                              ? '自定义供应商'
+                                              : account.provider === 'minimax'
+                                                ? `MiniMax · Token Plan · ${account.region === 'global' ? '国际区' : '中国区'}`
+                                                : account.provider === 'opencode-go'
+                                                  ? 'OpenCode Go · 订阅'
+                                                  : account.provider === 'deepseek'
+                                                    ? 'DeepSeek · 按量付费'
+                                                    : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
                                         </small>
                                       </div>
                                     </div>
@@ -1922,6 +1930,7 @@ function ModelTestCell({ draft, model }: { draft: AccountInput; model: string })
         name: draft.name,
         id: draft.id,
         provider: draft.provider,
+        baseUrl: draft.baseUrl,
         region: draft.region,
         secret: draft.secret,
         model,
@@ -2011,7 +2020,13 @@ function AccountEditor({
   const probeVersion = useRef(0)
   const lock = useRef(false)
   const change = <K extends keyof AccountInput>(key: K, value: AccountInput[K]) => {
-    if (key === 'secret' || key === 'region' || key === 'provider') {
+    if (
+      key === 'secret' ||
+      key === 'region' ||
+      key === 'provider' ||
+      key === 'baseUrl' ||
+      key === 'modelSource'
+    ) {
       probeVersion.current++
       setCapabilities(null)
       setReading(false)
@@ -2020,28 +2035,51 @@ function AccountEditor({
     setDraft((d) => ({
       ...d,
       ...(key === 'provider'
-        ? { secret: '', modelProtocols: {}, excludedModels: [], manualModels: [] }
+        ? {
+            secret: '',
+            baseUrl: '',
+            modelSource: 'automatic' as const,
+            modelProtocols: {},
+            excludedModels: [],
+            manualModels: []
+          }
         : {}),
       [key]: value
     }))
   }
   const visibleModels = [
-    ...new Set([...(capabilities?.models ?? []), ...(draft.manualModels ?? [])])
+    ...new Set([
+      ...(draft.provider === 'custom' && draft.modelSource === 'manual'
+        ? []
+        : (capabilities?.models ?? [])),
+      ...(draft.manualModels ?? [])
+    ])
   ].filter((model) => !draft.excludedModels?.includes(model))
   function addManualModel() {
-    const model = manualModel.trim()
-    if (!model || model.length > 200 || /[\s\x00-\x1f\x7f]/.test(model)) {
-      setManualModelError('请输入有效的模型 ID，最多 200 个字符，不能包含空格或控制字符。')
+    const models = [
+      ...new Set(
+        manualModel
+          .split(/[\n,，]+/)
+          .map((id) => id.trim())
+          .filter(Boolean)
+      )
+    ]
+    if (
+      !models.length ||
+      models.some((model) => model.length > 200 || /[\s\x00-\x1f\x7f]/.test(model))
+    ) {
+      setManualModelError('请输入有效的模型 ID，每个最多 200 个字符，不能包含空格或控制字符。')
       return
     }
-    if ((draft.manualModels?.length ?? 0) >= 2000 && !draft.manualModels?.includes(model)) {
+    const combined = [...new Set([...(draft.manualModels ?? []), ...models])]
+    if (combined.length > 2000) {
       setManualModelError('手动模型最多添加 2000 个。')
       return
     }
     setDraft((current) => ({
       ...current,
-      manualModels: [...new Set([...(current.manualModels ?? []), model])],
-      excludedModels: current.excludedModels?.filter((id) => id !== model)
+      manualModels: combined,
+      excludedModels: current.excludedModels?.filter((id) => !models.includes(id))
     }))
     setManualModel('')
     setManualModelError('')
@@ -2054,6 +2092,7 @@ function AccountEditor({
       const result = await api.inspectAccount({
         id: draft.id,
         provider: draft.provider,
+        baseUrl: draft.baseUrl,
         region: draft.region,
         secret: draft.secret
       })
@@ -2065,7 +2104,7 @@ function AccountEditor({
     }
   }
   useEffect(() => {
-    if (input.id) void inspect()
+    if (input.id && !(input.provider === 'custom' && input.modelSource === 'manual')) void inspect()
     return () => {
       probeVersion.current++
     }
@@ -2129,6 +2168,7 @@ function AccountEditor({
                 <option value="minimax">MiniMax · Token Plan</option>
                 <option value="deepseek">DeepSeek · 按量付费</option>
                 <option value="opencode-go">OpenCode Go · 订阅</option>
+                <option value="custom">自定义供应商 · API Key</option>
               </select>
             </Field>
             {((draft.provider ?? 'kimi') === 'kimi' || draft.provider === 'minimax') && (
@@ -2159,7 +2199,9 @@ function AccountEditor({
                         ? '填写已订阅 Go 的 OpenCode API Key。'
                         : draft.provider === 'deepseek'
                           ? '填写 DeepSeek 开放平台生成的密钥。'
-                          : '填写 Kimi Code 控制台生成的密钥。'
+                          : draft.provider === 'custom'
+                            ? '填写自定义供应商的 API Key。'
+                            : '填写 Kimi Code 控制台生成的密钥。'
                 }
               >
                 <input
@@ -2170,7 +2212,14 @@ function AccountEditor({
                   placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
                   onChange={(e) => change('secret', e.target.value)}
                   onBlur={() => {
-                    if (draft.secret?.trim()) void inspect()
+                    if (
+                      draft.secret?.trim() &&
+                      !(
+                        draft.provider === 'custom' &&
+                        (draft.modelSource === 'manual' || !draft.baseUrl?.trim())
+                      )
+                    )
+                      void inspect()
                   }}
                 />
               </Field>
@@ -2202,9 +2251,50 @@ function AccountEditor({
                 />
               </Field>
             )}
-            <Field label="上游 Base URL" hint="由供应商和区域自动确定，转发时按协议选择端点。">
-              <input type="url" readOnly value={accountBaseUrl(draft.region, draft.provider)} />
+            <Field
+              label="上游 Base URL"
+              hint={
+                draft.provider === 'custom'
+                  ? '填写完整 API 基础地址（包含 /v1 等前缀），例如 https://api.example.com/v1。支持 OpenAI 兼容接口。'
+                  : '由供应商和区域自动确定，转发时按协议选择端点。'
+              }
+            >
+              <input
+                type="url"
+                required
+                readOnly={draft.provider !== 'custom'}
+                value={
+                  draft.provider === 'custom'
+                    ? (draft.baseUrl ?? '')
+                    : accountBaseUrl(draft.region, draft.provider)
+                }
+                placeholder="https://api.example.com/v1"
+                onChange={(e) => change('baseUrl', e.target.value)}
+                onBlur={() => {
+                  if (
+                    draft.provider === 'custom' &&
+                    draft.modelSource !== 'manual' &&
+                    draft.baseUrl?.trim() &&
+                    (draft.secret?.trim() || draft.id)
+                  )
+                    void inspect()
+                }}
+              />
             </Field>
+            {draft.provider === 'custom' && (
+              <Field
+                label="模型列表来源"
+                hint="自动模式读取 Base URL 下的 /models；服务不支持时可选择仅手动配置。"
+              >
+                <select
+                  value={draft.modelSource ?? 'automatic'}
+                  onChange={(e) => change('modelSource', e.target.value as 'automatic' | 'manual')}
+                >
+                  <option value="automatic">自动获取（可手动补充）</option>
+                  <option value="manual">仅手动配置</option>
+                </select>
+              </Field>
+            )}
             <div className="form-grid">
               <Field
                 label="账号并发上限"
@@ -2250,11 +2340,21 @@ function AccountEditor({
               <button
                 className="button"
                 type="button"
-                disabled={busy || reading || (!input.id && !draft.secret?.trim())}
+                disabled={
+                  busy ||
+                  reading ||
+                  (draft.provider === 'custom' &&
+                    (draft.modelSource === 'manual' || !draft.baseUrl?.trim())) ||
+                  (!input.id && !draft.secret?.trim())
+                }
                 onClick={() => void inspect()}
               >
                 <RotateCcw size={14} />
-                {reading ? '正在获取…' : '获取上游信息'}
+                {reading
+                  ? '正在获取…'
+                  : draft.provider === 'custom'
+                    ? '获取模型列表'
+                    : '获取上游信息'}
               </button>
               {capabilities && (
                 <small>已同步 {new Date(capabilities.checkedAt).toLocaleTimeString()}</small>
@@ -2291,17 +2391,22 @@ function AccountEditor({
               <div className="manual-model-entry">
                 <label htmlFor="manual-model-id">手动添加模型</label>
                 <div className="manual-model-controls">
-                  <input
+                  <textarea
                     id="manual-model-id"
+                    rows={3}
                     value={manualModel}
-                    maxLength={200}
-                    placeholder="填写模型 ID，如 gpt-6-astra"
+                    maxLength={402000}
+                    placeholder="每行一个模型 ID，或用逗号分隔"
                     onChange={(event) => {
                       setManualModel(event.target.value)
                       setManualModelError('')
                     }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                      if (
+                        event.key === 'Enter' &&
+                        (event.ctrlKey || event.metaKey) &&
+                        !event.nativeEvent.isComposing
+                      ) {
                         event.preventDefault()
                         addManualModel()
                       }
@@ -2663,6 +2768,7 @@ const priceFields = [
   ['cacheWrite', '缓存写入']
 ] as const
 const providerNames = {
+  custom: '自定义供应商',
   codex: 'Codex',
   kimi: 'Kimi Code',
   deepseek: 'DeepSeek',

@@ -157,6 +157,18 @@ try {
   await host.waitFor({ state: 'visible' })
   assert.equal(await host.locator('.accounts').isVisible(), true)
   assert.equal(await host.locator('.session-summary').isVisible(), true)
+  data.accounts = [
+    { id: 'empty', name: '无额度账号', enabled: true, checkedAt: Date.now() },
+    { id: 'weekly-only', name: '仅周额度', enabled: true, checkedAt: Date.now(), weekly: quota(0) }
+  ]
+  await sync(true, true)
+  await host.getByRole('button', { name: '查看 仅周额度 额度' }).waitFor()
+  assert.equal(await host.locator('.account').count(), 1)
+  assert.equal(await host.locator('.stat').count(), 1)
+  assert.match(await host.locator('.stat').innerText(), /0%/)
+  assert.doesNotMatch(await host.locator('.stats').innerText(), /5h/)
+  await host.locator('.account').click()
+  assert.equal(await host.locator('.details .row').count(), 1)
   console.log(
     '通过：全部账号、1～3 个响应式布局、超过 3 个横向滚动、按钮间距、名称转义、过期和断连提示、重复注入保护、独立模块开关及空间回收。'
   )
