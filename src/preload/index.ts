@@ -35,6 +35,7 @@ const api: HelperApi = {
   openProjectPage: () => ipcRenderer.invoke(IPC.appOpenProject),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
+  getSleepProtection: () => ipcRenderer.invoke(IPC.sleepProtectionGet),
   saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   getGateway: () => ipcRenderer.invoke(IPC.gatewayGet),
   getRequestHistory: (before) => ipcRenderer.invoke(IPC.requestHistory, before),

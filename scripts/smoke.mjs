@@ -215,10 +215,39 @@ const upstream = createServer((req, res) => {
 await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve))
 const upstreamPort = upstream.address().port
 // 仅测试入口注入传输层，生产代码始终使用固定官方地址。
+const sleepStateFile = join(userData, 'mock-sleep-state')
+const mockPmset = join(userData, 'mock-pmset')
+await writeFile(sleepStateFile, '0')
+await writeFile(
+  mockPmset,
+  `#!/bin/sh
+state=${JSON.stringify(sleepStateFile)}
+if [ "$1" = -g ]; then
+  /usr/bin/printf 'SleepDisabled %s\\n' "$(/bin/cat "$state")"
+else
+  [ "$1 $2" = '-a disablesleep' ] || exit 2
+  /usr/bin/printf '%s' "$3" > "$state"
+fi
+`,
+  { mode: 0o700 }
+)
 const testEntry = join(userData, 'smoke-main.cjs')
 await writeFile(
   testEntry,
   `
+  // Run the real watchdog against a fake pmset, without administrator prompts or host changes.
+  const childProcess = require('node:child_process');
+  const originalExecFile = childProcess.execFile;
+  childProcess.execFile = (file, args, options, callback) => {
+    if (file === '/usr/bin/osascript' && args[1]?.startsWith('do shell script ')) {
+      const end = args[1].lastIndexOf(' with administrator privileges');
+      const command = JSON.parse(args[1].slice('do shell script '.length, end));
+      return originalExecFile('/bin/sh', ['-c', command.replaceAll('/usr/bin/pmset', ${JSON.stringify(mockPmset)})], options, callback);
+    }
+    return originalExecFile(file, args, options, callback);
+  };
+  const custom = require('node:util').promisify.custom;
+  childProcess.execFile[custom] = originalExecFile[custom];
   const { Tray } = require('electron');
   const setContextMenu = Tray.prototype.setContextMenu;
   Tray.prototype.setContextMenu = function (menu) {
@@ -404,6 +433,38 @@ try {
     0
   )
   await page.getByRole('button', { name: '实验性功能', exact: true }).click()
+  const sleepToggle = page.getByRole('switch', {
+    name: process.platform === 'darwin' ? '禁用系统睡眠（含合盖）' : '阻止自动休眠',
+    exact: true
+  })
+  await sleepToggle.waitFor()
+  assert.equal(await sleepToggle.isChecked(), false)
+  assert.equal(await page.getByLabel('释放延迟', { exact: true }).isDisabled(), true)
+  await sleepToggle.click()
+  await page.waitForFunction(
+    async () => (await window.navo.getSettings()).preventSleepDuringRequests
+  )
+  await page.getByLabel('释放延迟', { exact: true }).selectOption('900')
+  await page.waitForFunction(
+    async () => (await window.navo.getSettings()).sleepReleaseDelaySeconds === 900
+  )
+  await page.getByRole('button', { name: '深色模式', exact: true }).click()
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark')
+  assert.equal(
+    (await page.evaluate(() => window.navo.getSettings())).preventSleepDuringRequests,
+    true
+  )
+  await page.screenshot({ path: join(artifacts, 'request-sleep-settings.png') })
+  await page.getByRole('button', { name: '浅色模式', exact: true }).click()
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light')
+  await page.getByLabel('释放延迟', { exact: true }).selectOption('60')
+  await page.waitForFunction(
+    async () => (await window.navo.getSettings()).sleepReleaseDelaySeconds === 60
+  )
+  await sleepToggle.click()
+  await page.waitForFunction(
+    async () => !(await window.navo.getSettings()).preventSleepDuringRequests
+  )
   // 使用临时登录文件和模拟上游，验证完整主进程/预加载/界面导入链路。
   await page.getByRole('button', { name: '导入本地 Codex 认证', exact: true }).click()
   const codexRisk = page.getByRole('dialog', { name: '导入 Codex 认证风险提醒' })
@@ -695,6 +756,63 @@ try {
   await page.getByRole('button', { name: '返回概览', exact: true }).click()
   await page.getByRole('button', { name: '启动网关', exact: true }).click()
   await page.getByRole('button', { name: '停止网关', exact: true }).waitFor()
+  // Verify the real Electron assertion is acquired by gateway traffic and released after idle.
+  await application.evaluate(({ powerSaveBlocker }) => {
+    const original = powerSaveBlocker.start.bind(powerSaveBlocker)
+    globalThis.sleepBlockerIds = []
+    globalThis.restoreSleepBlocker = () => {
+      powerSaveBlocker.start = original
+    }
+    powerSaveBlocker.start = (type) => {
+      const id = original(type)
+      globalThis.sleepBlockerIds.push(id)
+      return id
+    }
+  })
+  await page.evaluate(() =>
+    window.navo.saveSettings({
+      preventSleepDuringRequests: true,
+      sleepReleaseDelaySeconds: 3
+    })
+  )
+  await (await fetch(`http://127.0.0.1:${gatewayPort}/sleep-blocker-check`)).text()
+  assert.equal(
+    await application.evaluate(
+      ({ powerSaveBlocker }) =>
+        globalThis.sleepBlockerIds.length === 1 &&
+        powerSaveBlocker.isStarted(globalThis.sleepBlockerIds[0])
+    ),
+    true
+  )
+  if (process.platform === 'darwin') {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await readFile(sleepStateFile, 'utf8')) === '1') break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.equal(await readFile(sleepStateFile, 'utf8'), '1')
+  }
+  await page.waitForTimeout(3500)
+  if (process.platform === 'darwin') assert.equal(await readFile(sleepStateFile, 'utf8'), '0')
+  assert.equal(
+    await application.evaluate(({ powerSaveBlocker }) =>
+      powerSaveBlocker.isStarted(globalThis.sleepBlockerIds[0])
+    ),
+    false
+  )
+  await (await fetch(`http://127.0.0.1:${gatewayPort}/sleep-blocker-check`)).text()
+  await page.evaluate(() =>
+    window.navo.saveSettings({
+      preventSleepDuringRequests: false,
+      sleepReleaseDelaySeconds: 60
+    })
+  )
+  assert.equal(
+    await application.evaluate(({ powerSaveBlocker }) =>
+      globalThis.sleepBlockerIds.some((id) => powerSaveBlocker.isStarted(id))
+    ),
+    false
+  )
+  await application.evaluate(() => globalThis.restoreSleepBlocker())
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   const originalClipboard = await application.evaluate(({ clipboard }) => clipboard.readText())
@@ -992,7 +1110,9 @@ try {
   )
   assert.equal(await application.evaluate(({ nativeTheme }) => nativeTheme.themeSource), 'dark')
   assert.deepEqual(JSON.parse(await readFile(join(userData, 'settings.json'), 'utf8')), {
-    theme: 'dark'
+    theme: 'dark',
+    preventSleepDuringRequests: false,
+    sleepReleaseDelaySeconds: 60
   })
   await page.screenshot({ path: join(artifacts, 'dark.png') })
 

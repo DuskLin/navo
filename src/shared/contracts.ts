@@ -2,6 +2,16 @@ export type Theme = 'light' | 'dark'
 
 export interface AppSettings {
   theme: Theme
+  preventSleepDuringRequests: boolean
+  sleepReleaseDelaySeconds: number
+}
+
+export interface SleepProtectionState {
+  mode: 'system' | 'idle'
+  authorized: boolean
+  active: boolean
+  externallyDisabled: boolean
+  error: string
 }
 
 export interface AppInfo {
@@ -45,7 +55,8 @@ export interface HelperApi {
   getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
-  saveSettings(settings: AppSettings): Promise<AppSettings>
+  getSleepProtection(): Promise<SleepProtectionState>
+  saveSettings(settings: Partial<AppSettings>): Promise<AppSettings>
   getGateway(): Promise<GatewaySnapshot>
   getRequestHistory(before?: number): Promise<RequestHistoryPage>
   getQuotaCycles(
@@ -363,6 +374,7 @@ export const IPC = {
   appOpenIssues: 'app:open-issues',
   appOpenProject: 'app:open-project',
   settingsGet: 'settings:get',
+  sleepProtectionGet: 'sleep-protection:get',
   settingsSave: 'settings:save',
   gatewayGet: 'gateway:get',
   requestHistory: 'gateway:request-history',

@@ -8,6 +8,7 @@ import {
   Menu,
   nativeTheme,
   net,
+  powerSaveBlocker,
   safeStorage,
   shell
 } from 'electron'
@@ -15,7 +16,9 @@ import { autoUpdater } from 'electron-updater'
 import { isAbsolute, join } from 'node:path'
 import { isTrustedRendererUrl } from './services/renderer-trust'
 import { IPC } from '../shared/contracts'
-import { SettingsStore } from './services/settings'
+import { SettingsStore, validateSettings } from './services/settings'
+import { RequestSleepBlocker } from './services/request-sleep-blocker'
+import { MacSleepProtection } from './services/mac-sleep'
 import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
 import { kimiModelConfig } from './services/kimi-model-config'
@@ -44,6 +47,9 @@ if (process.env.NAVO_TEST_USER_DATA) app.setPath('userData', process.env.NAVO_TE
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
+let requestSleepBlocker: RequestSleepBlocker | undefined
+let macSleepProtection: MacSleepProtection | undefined
+let stopSleepActivity: (() => void) | undefined
 let dashboard: DashboardServer | undefined
 let usageService: UsageService | undefined
 let stopKimiQuotaExport: (() => void) | undefined
@@ -130,6 +136,32 @@ void app
     })
     await gatewayStore.load()
     const service = new Gateway(gatewayStore)
+    macSleepProtection = process.platform === 'darwin' ? new MacSleepProtection() : undefined
+    const requestPower = {
+      start(type: 'prevent-app-suspension') {
+        const id = powerSaveBlocker.start(type)
+        try {
+          macSleepProtection?.setWanted(true)
+        } catch (error) {
+          powerSaveBlocker.stop(id)
+          throw error
+        }
+        return id
+      },
+      stop(id: number) {
+        // Release the idle assertion even if communicating with the helper fails.
+        const stopped = powerSaveBlocker.stop(id)
+        macSleepProtection?.setWanted(false)
+        return stopped
+      }
+    }
+    requestSleepBlocker = new RequestSleepBlocker(requestPower, {
+      ...settings.get(),
+      preventSleepDuringRequests: !macSleepProtection && settings.get().preventSleepDuringRequests
+    })
+    stopSleepActivity = service.onActiveRequestsChange((count) =>
+      requestSleepBlocker?.setActiveRequests(count)
+    )
     kimiDesktop = new KimiDesktopIntegration(app.getPath('userData'), kimiQuotaWidget)
     await kimiDesktop.load()
     kimiDesktop.start()
@@ -228,6 +260,17 @@ void app
       electron: process.versions.electron
     }))
     handle(IPC.settingsGet, () => settings.get())
+    handle(
+      IPC.sleepProtectionGet,
+      () =>
+        macSleepProtection?.snapshot() ?? {
+          mode: 'idle',
+          authorized: true,
+          active: false,
+          externallyDisabled: false,
+          error: ''
+        }
+    )
     handle(IPC.migrationChooseDirectory, async (currentPath) => {
       const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       const options: Electron.OpenDialogOptions = {
@@ -294,8 +337,24 @@ void app
       )
     )
     handle(IPC.settingsSave, async (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error('设置格式无效')
+      const next = validateSettings({ ...settings.get(), ...value })
+      if (
+        'preventSleepDuringRequests' in value &&
+        value.preventSleepDuringRequests === true &&
+        next.preventSleepDuringRequests
+      ) {
+        await macSleepProtection?.prepare()
+      }
       const saved = await settings.save(value)
       nativeTheme.themeSource = saved.theme
+      requestSleepBlocker?.configure({
+        ...saved,
+        preventSleepDuringRequests:
+          saved.preventSleepDuringRequests &&
+          (!macSleepProtection || macSleepProtection.snapshot().authorized)
+      })
       return saved
     })
     handle(IPC.gatewayGet, () => service.snapshot())
@@ -392,6 +451,14 @@ void app
     )
     tray = createTray(showWindow, (listener) => service.onActiveRequestsChange(listener))
     createWindow()
+    if (macSleepProtection && settings.get().preventSleepDuringRequests) {
+      void macSleepProtection
+        .prepare()
+        .then(() => {
+          requestSleepBlocker?.configure(settings.get())
+        })
+        .catch((error) => console.warn('系统休眠控制尚未授权：', error))
+    }
     updater.start()
     service.startAccountRefresh()
     app.on('activate', showWindow)
@@ -408,15 +475,23 @@ void app
 app.on('before-quit', (event) => {
   if (quitting) return
   quitting = true
-  if (!gateway) return
+  requestSleepBlocker?.dispose()
+  if (!gateway && !macSleepProtection) return
   event.preventDefault()
-  void Promise.allSettled([gateway.shutdown(), dashboard?.close()]).finally(() => {
+  void Promise.allSettled([
+    gateway?.shutdown(),
+    dashboard?.close(),
+    macSleepProtection?.close()
+  ]).finally(() => {
     app.quit()
   })
 })
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
+  stopSleepActivity?.()
+  requestSleepBlocker?.dispose()
+  macSleepProtection?.invalidate()
   stopKimiQuotaExport?.()
   kimiDesktop?.close()
   dashboard?.tunnel.terminate()

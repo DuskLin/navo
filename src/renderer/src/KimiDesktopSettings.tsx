@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Monitor, RefreshCw, FlaskConical } from 'lucide-react'
 import { SessionMigrationSettings } from './SessionMigrationSettings'
 import { SettingsToggle } from './SettingsToggle'
+import { RequestSleepSettings } from './RequestSleepSettings'
 import type { KimiDesktopState, KimiDesktopPreferences } from '../../shared/kimi-desktop'
 import './experimental.css'
 
@@ -68,6 +69,7 @@ export function KimiDesktopSettings({ children }: { children?: ReactNode }) {
         <span className="lab-badge">预览</span>
       </header>
       {children}
+      <RequestSleepSettings />
       <section className="lab-card" aria-label="Kimi Code Desktop 集成">
         <header className="lab-card-heading">
           <span className="lab-icon">
