@@ -155,10 +155,12 @@ void app
         return stopped
       }
     }
-    requestSleepBlocker = new RequestSleepBlocker(requestPower, {
-      ...settings.get(),
-      preventSleepDuringRequests: !macSleepProtection && settings.get().preventSleepDuringRequests
-    })
+    requestSleepBlocker = macSleepProtection
+      ? new RequestSleepBlocker(requestPower, {
+          ...settings.get(),
+          preventSleepDuringRequests: false
+        })
+      : undefined
     stopSleepActivity = service.onActiveRequestsChange((count) =>
       requestSleepBlocker?.setActiveRequests(count)
     )
@@ -265,7 +267,7 @@ void app
       () =>
         macSleepProtection?.snapshot() ?? {
           mode: 'idle',
-          authorized: true,
+          authorized: false,
           active: false,
           externallyDisabled: false,
           error: ''
@@ -339,6 +341,12 @@ void app
     handle(IPC.settingsSave, async (value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value))
         throw new Error('设置格式无效')
+      if (
+        'preventSleepDuringRequests' in value &&
+        value.preventSleepDuringRequests === true &&
+        process.platform !== 'darwin'
+      )
+        throw new Error('请求期间阻止休眠仅支持 macOS')
       const next = validateSettings({ ...settings.get(), ...value })
       if (
         'preventSleepDuringRequests' in value &&
@@ -352,8 +360,7 @@ void app
       requestSleepBlocker?.configure({
         ...saved,
         preventSleepDuringRequests:
-          saved.preventSleepDuringRequests &&
-          (!macSleepProtection || macSleepProtection.snapshot().authorized)
+          saved.preventSleepDuringRequests && !!macSleepProtection?.snapshot().authorized
       })
       return saved
     })

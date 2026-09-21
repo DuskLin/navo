@@ -36,7 +36,7 @@ export function RequestSleepSettings() {
   }, [])
 
   async function save(patch: Partial<AppSettings>) {
-    if (pending.current) return
+    if (pending.current || protection?.mode !== 'system') return
     pending.current = true
     setBusy(true)
     setError('')
@@ -63,23 +63,17 @@ export function RequestSleepSettings() {
         </span>
         <div className="lab-heading-copy">
           <h3>请求期间阻止休眠</h3>
-          <p>
-            {protection?.mode === 'system'
-              ? '请求期间禁用系统睡眠，合盖仍可运行，屏幕可正常熄灭'
-              : '网关处理请求时保持系统唤醒，屏幕仍可自动熄灭'}
-          </p>
+          <p>请求期间禁用系统睡眠，合盖仍可运行，屏幕可正常熄灭</p>
         </div>
-        <span className="lab-badge">实验性</span>
+        <span className="lab-badge">macOS</span>
       </header>
-      {settings ? (
+      {protection?.mode === 'idle' ? (
+        <p className="lab-footnote">此功能仅支持 macOS。</p>
+      ) : settings && protection ? (
         <div className="lab-toggles">
           <SettingsToggle
-            label={protection?.mode === 'system' ? '禁用系统睡眠（含合盖）' : '阻止自动休眠'}
-            hint={
-              protection?.mode === 'system'
-                ? '需要 macOS 管理员授权；最后一个请求结束后延迟恢复'
-                : '最后一个请求结束后延迟释放；新请求到来时重新保持唤醒'
-            }
+            label="禁用系统睡眠（含合盖）"
+            hint="需要 macOS 管理员授权；最后一个请求结束后延迟恢复"
             checked={settings.preventSleepDuringRequests}
             disabled={busy}
             onChange={(preventSleepDuringRequests) => void save({ preventSleepDuringRequests })}
@@ -108,7 +102,7 @@ export function RequestSleepSettings() {
       ) : (
         !error && <p className="lab-loading">正在读取设置…</p>
       )}
-      {protection?.mode === 'system' ? (
+      {protection?.mode === 'system' && (
         <>
           <footer className="lab-card-footer">
             <span className={`lab-status ${protection.active ? 'is-active' : ''}`} role="status">
@@ -139,8 +133,6 @@ export function RequestSleepSettings() {
             应用异常退出或失去响应后，辅助进程会在约 10 秒内恢复。屏幕休眠设置不变。
           </p>
         </>
-      ) : (
-        <p className="lab-footnote">关闭开关或退出 Navo 会释放。此平台仅阻止自动休眠。</p>
       )}
       {busy && (
         <p className="lab-footnote" role="status">

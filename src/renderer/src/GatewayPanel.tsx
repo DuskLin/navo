@@ -1819,7 +1819,7 @@ export function GatewayPanel({
       )}
       {kimiImport && (
         <Modal
-          title="导入本地 Kimi 登录态"
+          title="导入本地 Kimi 登录态（仅 macOS）"
           close={() => {
             if (!busy) setKimiImport(false)
           }}
@@ -1828,6 +1828,7 @@ export function GatewayPanel({
             读取本机 Kimi Code
             登录凭据，加密保存到网关，并同步模型和额度。同一账号重复导入会更新认证。
           </p>
+          <p className="muted">当前仅支持 macOS，其他渠道导入将在优化后开放。</p>
           <Field label="登录账号区域">
             <select
               disabled={busy}
@@ -2256,7 +2257,12 @@ function AccountEditor({
                 autoFocus
               />
             </Field>
-            <Field label="供应商">
+            <Field
+              label="供应商"
+              hint={
+                !input.id ? '本地登录态导入仅支持 macOS，其他渠道导入将在优化后开放。' : undefined
+              }
+            >
               <select
                 disabled={input.kind === 'oauth'}
                 value={
@@ -2272,7 +2278,7 @@ function AccountEditor({
                 {input.provider === 'codex' && <option value="codex">Codex · 本地认证</option>}
                 <option value="kimi">Kimi Code · API Key</option>
                 {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
-                  <option value="kimi-local">Kimi Code · 本地登录态</option>
+                  <option value="kimi-local">Kimi Code · 本地登录态（仅 macOS）</option>
                 )}
                 <option value="commandcode-goat">Command Code · GOAT Plan</option>
                 <option value="minimax">MiniMax · Token Plan</option>
