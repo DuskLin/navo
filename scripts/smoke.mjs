@@ -263,6 +263,7 @@ await writeFile(
     }
     return realFetch(input, init);
   };
+  require('electron').net.fetch = globalThis.fetch;
   require(${JSON.stringify(resolve('out/main/index.js'))});
 `
 )

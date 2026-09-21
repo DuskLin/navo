@@ -144,8 +144,26 @@ export class KimiAuth {
         redirect: 'error',
         signal: AbortSignal.timeout(20000)
       })
-    } catch {
-      throw new Error('Kimi 认证请求失败，请检查网络后重试')
+    } catch (error) {
+      // Only classify known transport errors; raw messages may contain credentials or URLs.
+      const message = error instanceof Error ? error.message : ''
+      const cause = error instanceof Error ? error.cause : undefined
+      const code = cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : ''
+      const detail = `${message} ${code}`
+      const hint =
+        (error instanceof Error && error.name === 'TimeoutError') ||
+        /ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/.test(detail)
+          ? '请求超时，请检查网络或系统代理后重试'
+          : /ERR_PROXY_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_NO_SUPPORTED_PROXIES/.test(
+                detail
+              )
+            ? '系统代理连接失败，请检查代理设置并确认代理软件正在运行'
+            : /ERR_CERT_|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY_LEAF_SIGNATURE|SELF_SIGNED_CERT/.test(
+                  detail
+                )
+              ? '证书校验失败，请检查系统时间、证书及代理设置'
+              : '请检查网络和系统代理设置后重试'
+      throw new Error(`Kimi 认证请求失败：${hint}`)
     }
     if (!response.ok) {
       await response.body?.cancel()

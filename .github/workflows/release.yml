@@ -74,6 +74,9 @@ jobs:
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm run test:unit
+      - name: Test account authentication through desktop proxy
+        if: runner.os != 'Linux'
+        run: npm run test:kimi-network
       - name: Test macOS update installation
         if: runner.os == 'macOS'
         run: npm run test:update:mac

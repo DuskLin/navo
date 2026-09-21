@@ -167,6 +167,41 @@ test('Kimi failed import does not save partial account or expose upstream body',
   }
 })
 
+test('Kimi transport failures give safe diagnostics and allow import retry', async () => {
+  const { dir, store } = await fixture()
+  try {
+    const failures: [Error, RegExp][] = [
+      [new DOMException('secret-url', 'TimeoutError'), /请求超时/],
+      [new Error('net::ERR_PROXY_CONNECTION_FAILED secret-token'), /系统代理连接失败/],
+      [new Error('net::ERR_CERT_AUTHORITY_INVALID secret-token'), /证书校验失败/],
+      [new TypeError('fetch failed', { cause: { code: 'ETIMEDOUT' } }), /请求超时/],
+      [new Error('secret-token'), /网络和系统代理/]
+    ]
+    for (const [failure, expected] of failures) {
+      let fail = true
+      const service = new KimiAuth(
+        store,
+        async (url, init) => {
+          if (fail) throw failure
+          return metadata(url, init)
+        },
+        async () => parseKimiAuth(auth(), 'device-test')
+      )
+      await assert.rejects(service.importLocal('mainland-cn'), (error) => {
+        assert.ok(error instanceof Error)
+        assert.match(error.message, expected)
+        assert.doesNotMatch(error.message, /secret/)
+        return true
+      })
+      fail = false
+      await service.importLocal('mainland-cn')
+      assert.equal(store.get().accounts.length, 1)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('Kimi OAuth gateway forwards native protocols with sealed device headers', async () => {
   const { dir, store } = await fixture()
   const calls: string[] = []

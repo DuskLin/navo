@@ -22,6 +22,7 @@ import { RequestSleepBlocker } from './services/request-sleep-blocker'
 import { MacSleepProtection } from './services/mac-sleep'
 import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
+import { metadataRequest } from './services/metadata-request'
 import { kimiModelConfig } from './services/kimi-model-config'
 import { UsageService } from './services/usage-service'
 import { UpdateService } from './services/updates'
@@ -137,7 +138,7 @@ void app
       decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64'))
     })
     await gatewayStore.load()
-    const service = new Gateway(gatewayStore)
+    const service = new Gateway(gatewayStore, fetch, metadataRequest)
     macSleepProtection = process.platform === 'darwin' ? new MacSleepProtection() : undefined
     const requestPower = {
       start(type: 'prevent-app-suspension') {

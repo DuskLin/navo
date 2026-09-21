@@ -24,6 +24,7 @@ await writeFile(
     return setToolTip.call(this, text);
   };
   globalThis.fetch = async () => { throw new Error('Offline test'); };
+  require('electron').net.fetch = globalThis.fetch;
   require(${JSON.stringify(resolve('out/main/index.js'))});
 `
 )
