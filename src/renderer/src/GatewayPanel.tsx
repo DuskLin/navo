@@ -1,3 +1,4 @@
+import { RollingNumber } from './RollingNumber'
 import { autoMatchCatalog } from '../../shared/catalog-match'
 import { hasQuotaDisplay, hasQuotaWindow } from '../../shared/quota-display'
 import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
@@ -178,11 +179,15 @@ function AccountPerformance({
                           key={period}
                           title={`${period === 'peak' ? '峰期' : '谷期'} · ${count ?? 0} 个有效请求；${formula}`}
                         >
-                          {value == null
-                            ? '—'
-                            : metric === 'firstToken'
-                              ? formatLatency(value)
-                              : `${value.toFixed(1)} tokens/s`}
+                          <RollingNumber
+                            value={
+                              value == null
+                                ? '—'
+                                : metric === 'firstToken'
+                                  ? formatLatency(value)
+                                  : `${value.toFixed(1)} tokens/s`
+                            }
+                          />
                         </td>
                       )
                     })}
@@ -398,7 +403,9 @@ function BalanceDetails({
         {capabilities?.balance ? (
           capabilities.balance.balances.map((entry, index) => (
             <small key={`${entry.currency}-${index}`}>
-              {entry.currency} {entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
+              <RollingNumber
+                value={`${entry.currency} ${entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}`}
+              />
             </small>
           ))
         ) : (
@@ -410,13 +417,15 @@ function BalanceDetails({
   return (
     <div className="quota-details" aria-label="DeepSeek 余额">
       <strong>按量付费余额</strong>
-      {loading ? (
+      {loading && !capabilities?.balance ? (
         <p>正在获取…</p>
       ) : capabilities?.balance ? (
         <>
           {capabilities.balance.balances.map((entry, index) => (
             <p key={`${entry.currency}-${index}`}>
-              {entry.currency} {entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
+              <RollingNumber
+                value={`${entry.currency} ${entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}`}
+              />
             </p>
           ))}
           {!capabilities.balance.available && <p className="warning">余额不足，暂不可调度</p>}
@@ -604,11 +613,15 @@ function QuotaDetails({
                   className="remaining-percent"
                   title={`剩余 ${quotaRemaining(window, quota?.unit)}`}
                 >
-                  {percent === null
-                    ? quota?.unit === 'USD'
-                      ? quotaRemaining(window, quota.unit)
-                      : '—'
-                    : `${Number(percent.toFixed(1))}%`}
+                  <RollingNumber
+                    value={
+                      percent === null
+                        ? quota?.unit === 'USD'
+                          ? quotaRemaining(window, quota.unit)
+                          : '—'
+                        : `${Number(percent.toFixed(1))}%`
+                    }
+                  />
                 </b>
               )}
               {!overview && <span>剩余 {quotaRemaining(window, quota?.unit)}</span>}
@@ -639,10 +652,16 @@ function QuotaDetails({
                       return (
                         <div key={amount.currency}>
                           <span>
-                            估算总额 <b>{money(amount.total)}</b>
+                            估算总额{' '}
+                            <b>
+                              <RollingNumber value={money(amount.total)} />
+                            </b>
                           </span>
                           <span>
-                            估算可用 <b>{money(amount.remaining)}</b>
+                            估算可用{' '}
+                            <b>
+                              <RollingNumber value={money(amount.remaining)} />
+                            </b>
                           </span>
                         </div>
                       )
@@ -656,7 +675,10 @@ function QuotaDetails({
                         key={average.currency}
                         title={`本账号 ${label.split(' ')[0]} 的 ${average.cycles} 个有效周期的估算总额算术平均；当前周期有有效估算时也计入，每周期只取最后一次有效估算，币种分别统计。从启用此功能起积累，历史周期保留当时价格。`}
                       >
-                        估算均值 <b>{quotaMoney(average.currency, average.total)}</b>
+                        估算均值{' '}
+                        <b>
+                          <RollingNumber value={quotaMoney(average.currency, average.total)} />
+                        </b>
                       </span>
                     ))
                   ) : (
@@ -667,9 +689,13 @@ function QuotaDetails({
                   <span title="本周期截至额度同步时的本地请求：缓存读取 token ÷（未缓存输入 + 缓存读取 + 缓存写入 token）。按 token 总量汇总，不含输出；跳过未报告输入或缓存读取的请求。无有效输入时显示 —。">
                     缓存命中率{' '}
                     <b>
-                      {estimate.cacheHitRate == null
-                        ? '—'
-                        : `${Number((estimate.cacheHitRate * 100).toFixed(1))}%`}
+                      <RollingNumber
+                        value={
+                          estimate.cacheHitRate == null
+                            ? '—'
+                            : `${Number((estimate.cacheHitRate * 100).toFixed(1))}%`
+                        }
+                      />
                     </b>
                   </span>
                 </div>

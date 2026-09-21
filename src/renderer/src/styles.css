@@ -1985,7 +1985,8 @@ textarea {
   color: var(--muted);
   line-height: 1.7;
 }
-.quota-cost-estimate span {
+.quota-cost-estimate > span,
+.quota-cost-estimate > div > span {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -2293,7 +2294,7 @@ textarea {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-.activity-summary span {
+.activity-summary > div > span {
   color: var(--muted);
   font-size: 12px;
 }

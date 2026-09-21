@@ -1,0 +1,24 @@
+.rolling-number {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+.rolling-number .rolling-number-digit {
+  display: inline-block;
+  overflow: hidden;
+  width: 1ch;
+  height: 1.2em;
+  line-height: 1.2;
+  vertical-align: -0.2em;
+}
+
+.rolling-number .rolling-number-track {
+  display: block;
+  transform: translateY(-50%);
+}
+
+.rolling-number .rolling-number-track > span {
+  display: block;
+  height: 1.2em;
+}

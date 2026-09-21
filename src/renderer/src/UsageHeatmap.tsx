@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { formatUsageCost, heatmapLevel, localDayKey, type UsageStats } from '../../shared/usage'
 
+import { RollingNumber } from './RollingNumber'
+
 const tokens = (value: number | null) => (value == null ? '未知' : value.toLocaleString('zh-CN'))
 const compactTokens = (value: number) =>
   new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
@@ -143,7 +145,9 @@ export function UsageHeatmap({
           }
         ].map((item) => (
           <div key={item.label} title={item.hint}>
-            <strong>{item.value}</strong>
+            <strong>
+              <RollingNumber value={item.value} />
+            </strong>
             <span>{item.label}</span>
           </div>
         ))}

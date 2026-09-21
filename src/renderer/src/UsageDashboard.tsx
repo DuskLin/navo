@@ -3,6 +3,7 @@ import { Activity, ArrowDown, ArrowUp, CircleSlash, DollarSign, Sparkles, Zap } 
 import type { UsageStats, UsageTotals } from '../../shared/usage'
 import { formatUsageCost, heatmapRange } from '../../shared/usage'
 import { UsageHeatmap } from './UsageHeatmap'
+import { RollingNumber } from './RollingNumber'
 
 const compact = (n: number | null | undefined) =>
   n == null
@@ -305,7 +306,7 @@ export function UsageDashboard({
                   真实消耗 Tokens
                 </small>
                 <strong title={exact(s?.totalTokens ?? 0)}>
-                  {loading ? '…' : exact(s?.totalTokens ?? 0)}
+                  <RollingNumber value={!data && loading ? '…' : exact(s?.totalTokens ?? 0)} />
                 </strong>
               </div>
             </div>
@@ -316,7 +317,9 @@ export function UsageDashboard({
                     <Icon size={13} />
                     {label}
                   </small>
-                  <strong>{compact(s?.[key] ?? 0)}</strong>
+                  <strong>
+                    <RollingNumber value={compact(s?.[key] ?? 0)} />
+                  </strong>
                 </div>
               ))}
               <div className="cache-hit-metric">
@@ -370,7 +373,7 @@ export function UsageDashboard({
                       s?.cacheRead == null ? '缓存命中 -' : `缓存命中 ${exact(s.cacheRead)} tokens`
                     }
                   >
-                    {s?.cacheRead == null ? '-' : compact(s.cacheRead)}
+                    <RollingNumber value={s?.cacheRead == null ? '-' : compact(s.cacheRead)} />
                   </strong>
                 </div>
               </div>
@@ -379,14 +382,18 @@ export function UsageDashboard({
                   <Activity size={13} />
                   总请求数
                 </small>
-                <strong>{s?.requests ?? '—'}</strong>
+                <strong>
+                  <RollingNumber value={s?.requests ?? '—'} />
+                </strong>
               </div>
               <div title="上游报告费用优先，否则按当前模型单价计算；缺失价格与用量按 0 计，不同币种分别汇总">
                 <small>
                   <DollarSign size={13} />
                   总成本
                 </small>
-                <strong className="usage-cost-value">{s ? formatUsageCost(s) : '—'}</strong>
+                <strong className="usage-cost-value">
+                  <RollingNumber value={s ? formatUsageCost(s) : '—'} />
+                </strong>
               </div>
               <div
                 tabIndex={0}
@@ -396,7 +403,9 @@ export function UsageDashboard({
                   <CircleSlash size={13} />
                   中断请求
                 </small>
-                <strong>{s?.interruptedRequests ?? 0} 次</strong>
+                <strong>
+                  <RollingNumber value={`${s?.interruptedRequests ?? 0} 次`} />
+                </strong>
               </div>
             </div>
           </div>
