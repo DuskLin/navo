@@ -1,4 +1,5 @@
 import type { CatalogPrice, ModelPrice, ModelPriceCatalogSnapshot } from './contracts'
+import { autoMatchCatalog, hasCatalogPrice } from './catalog-match'
 
 export const PRICE_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
 export type PriceField = (typeof PRICE_FIELDS)[number]
@@ -28,7 +29,10 @@ export function matchedModelPrice(
     return catalog?.entries?.find(
       (p) => p.provider === price.catalogMatch!.provider && p.model === price.catalogMatch!.model
     )
-  return catalog?.prices.find((p) => p.provider === price.provider && p.model === price.model)
+  return (
+    autoMatchCatalog(catalog?.entries ?? [], price.model, price.provider) ??
+    catalog?.prices.find((p) => p.provider === price.provider && p.model === price.model)
+  )
 }
 
 export function searchCatalogPrices(entries: CatalogPrice[], query: string): CatalogPrice[] {
@@ -38,9 +42,9 @@ export function searchCatalogPrices(entries: CatalogPrice[], query: string): Cat
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map(normalize)
+    .map((word) => normalize(word.split('/').at(-1) ?? word))
     .filter(Boolean)
-  const exact = normalize(query)
+  const exact = normalize(query.split('/').at(-1) ?? query)
   return entries
     .filter((p) =>
       words.every((word) =>
@@ -49,7 +53,9 @@ export function searchCatalogPrices(entries: CatalogPrice[], query: string): Cat
     )
     .sort(
       (a, b) =>
-        Number(normalize(b.model) === exact) - Number(normalize(a.model) === exact) ||
+        Number(normalize(b.model.split('/').at(-1) ?? b.model) === exact) -
+          Number(normalize(a.model.split('/').at(-1) ?? a.model) === exact) ||
+        Number(hasCatalogPrice(b)) - Number(hasCatalogPrice(a)) ||
         a.model.localeCompare(b.model) ||
         a.provider.localeCompare(b.provider)
     )

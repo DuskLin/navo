@@ -18,6 +18,7 @@ import { IPC } from '../shared/contracts'
 import { SettingsStore } from './services/settings'
 import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
+import { kimiModelConfig } from './services/kimi-model-config'
 import { UsageService } from './services/usage-service'
 import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
@@ -367,6 +368,11 @@ void app
       // 保存默认分组后再复制，避免尚未落盘的密钥在重启后变化。
       await gatewayStore.mutate(() => {})
       clipboard.writeText(service.connection(value))
+    })
+    handle(IPC.kimiModelConfigCopy, async (value) => {
+      const model = string(value, '模型 ID')
+      await service.pricing.refresh()
+      clipboard.writeText(kimiModelConfig(model, service.snapshot()))
     })
     if (gatewayStore.get().settings.autoStart) {
       try {

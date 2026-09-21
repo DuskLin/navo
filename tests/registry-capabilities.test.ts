@@ -73,7 +73,7 @@ test('missing, disabled and malformed capabilities do not invent effort levels o
   })
 })
 
-test('shared models advertise common capabilities and never claim a missing account supports video', () => {
+test('shared models advertise common capabilities and unresolved explicit metadata stays unknown', () => {
   const rich = parseRegistryCapabilities(metadata)!
   const limited = parseRegistryCapabilities({
     ...metadata,
@@ -96,7 +96,18 @@ test('shared models advertise common capabilities and never claim a missing acco
       { provider: 'opencode-go', models: ['k3'] }
     ],
     entries,
-    []
+    [
+      {
+        provider: 'opencode-go',
+        model: 'k3',
+        currency: 'USD',
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+        catalogMatch: { provider: 'missing', model: 'k3' }
+      }
+    ]
   ).k3
   assert.equal(shared.modalities, undefined)
   assert.equal(shared.support_efforts, undefined)

@@ -7,12 +7,14 @@ export function Modal({
   close,
   children,
   className = '',
+  beforeContent,
   footer
 }: {
   title: string
   close: () => void
   children: ReactNode
   className?: string
+  beforeContent?: ReactNode
   footer?: ReactNode
 }) {
   const ref = useRef<HTMLDialogElement>(null)
@@ -36,6 +38,7 @@ export function Modal({
           <X size={18} />
         </button>
       </div>
+      {beforeContent}
       <OverlayScrollArea label={`${title}内容`}>{children}</OverlayScrollArea>
       {footer}
     </dialog>

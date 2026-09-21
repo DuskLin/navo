@@ -1,6 +1,6 @@
 import type { CatalogPrice, ModelPrice, Provider } from '../../shared/contracts'
 import { mergeRegistryCapabilities } from './registry-capabilities'
-import { catalogProviders } from './model-price-catalog'
+import { autoMatchCatalog } from '../../shared/catalog-match'
 import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
 
 type RegistryAccount = {
@@ -25,7 +25,7 @@ function displayName(id: string): string {
     .join(' ')
 }
 
-/** Keep routing IDs intact; match metadata only by provider/model or an explicit saved mapping. */
+/** Keep routing IDs intact; explicit associations override automatic catalog matching. */
 export function registryModels(
   accounts: RegistryAccount[],
   entries: CatalogPrice[],
@@ -45,13 +45,9 @@ export function registryModels(
           const mapping = prices.find(
             (price) => price.provider === provider && price.model === upstreamModel
           )?.catalogMatch
-          const entry = catalog.get(
-            JSON.stringify(
-              mapping
-                ? [mapping.provider, mapping.model]
-                : [catalogProviders[provider], upstreamModel]
-            )
-          )
+          const entry = mapping
+            ? catalog.get(JSON.stringify([mapping.provider, mapping.model]))
+            : autoMatchCatalog(entries, upstreamModel, provider)
           return entry
         })
       const matches = candidates.filter((entry) => entry !== undefined)

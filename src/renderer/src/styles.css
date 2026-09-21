@@ -505,7 +505,7 @@ td small {
 }
 :root[data-theme='dark'] .deepseek-logo,
 :root[data-theme='dark'] .minimax-logo,
-:root[data-theme='dark'] img.model-logo[data-brand='minimax'] {
+:root[data-theme='dark'] img.monochrome-logo {
   filter: brightness(0) invert(1);
 }
 .kimi-logo {
@@ -640,6 +640,118 @@ td small {
   border-radius: 14px;
   padding: 0;
   box-shadow: 0 20px 90px #00000035;
+}
+.modal.model-list-modal {
+  width: min(760px, calc(100vw - 32px));
+}
+.model-list-toolbar {
+  flex-shrink: 0;
+  padding: 0 24px;
+}
+.model-list-modal .model-list-copy-feedback {
+  flex-shrink: 0;
+}
+.model-list-search {
+  width: 100%;
+}
+.model-list-items {
+  display: grid;
+  gap: 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.model-list-item {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.model-list-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--background);
+}
+.model-list-heading > :first-child {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+}
+.model-list-heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.model-list-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.model-list-copy-button {
+  flex-shrink: 0;
+}
+.model-list-copy-feedback {
+  padding: 0 24px 12px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.model-list-copy-error {
+  color: var(--error-text);
+}
+.model-list-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+.model-list-table th,
+.model-list-table td {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.model-list-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.model-list-table th:first-child {
+  width: 34%;
+}
+.model-list-provider-name {
+  font-weight: 500;
+}
+.model-list-account {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.model-list-status {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--warning-text);
+  font-size: 11px;
+}
+.model-list-route {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.model-list-route-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.model-list-route.is-mapped .model-list-route-label {
+  color: var(--accent-text);
+}
+.model-list-target {
+  font-size: 12px;
+  line-height: 1.5;
 }
 .modal[open] {
   display: flex;

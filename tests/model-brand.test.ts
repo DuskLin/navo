@@ -53,7 +53,11 @@ test('direct providers, display names and future family versions keep their bran
     ['mimo-v3-pro', 'mimo'],
     ['claude-sonnet-4', 'claude'],
     ['gemini-3-pro', 'gemini'],
-    ['glm-6', 'zai']
+    ['glm-6', 'zai'],
+    ['huawei/pangu-pro', 'huawei'],
+    ['spark-4', 'spark'],
+    ['stepfun/step-3', 'stepfun'],
+    ['doubao-seed-1.6', 'doubao']
   ])
     assert.equal(modelBrand(id), expected, id)
   for (const id of ['', 'other-kimi', 'my-grok-proxy', 'qwendog', 'unknown-model'])

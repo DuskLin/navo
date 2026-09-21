@@ -1,4 +1,8 @@
 export type ModelBrand =
+  | 'huawei'
+  | 'spark'
+  | 'stepfun'
+  | 'doubao'
   | 'kimi'
   | 'grok'
   | 'deepseek'
@@ -30,6 +34,10 @@ export function modelBrand(model: string): ModelBrand | null {
     [/^(?:gpt(?:[-_ .]|$)|o[134](?:[-_ .]|$))/, 'openai'],
     [/^(?:muse[-_ ]spark|llama)(?:[-_ .\d]|$)/, 'meta'],
     [/^claude(?:[-_ .]|$)/, 'claude'],
+    [/^(?:pangu|huawei)(?:[-_ .\d]|$)/, 'huawei'],
+    [/^spark(?:[-_ .\d]|$)/, 'spark'],
+    [/^(?:step|stepfun)(?:[-_ .\d]|$)/, 'stepfun'],
+    [/^doubao(?:[-_ .\d]|$)/, 'doubao'],
     [/^gemini(?:[-_ .]|$)/, 'gemini'],
     // No dedicated brand mark in the supplied set: show the serving platform.
     [/^(?:union|omen)[-_ ]alpha(?:[-_ .]|$)/, 'opencode']

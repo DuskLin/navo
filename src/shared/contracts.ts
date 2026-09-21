@@ -66,6 +66,7 @@ export interface HelperApi {
   saveGateway(input: GatewaySettings): Promise<GatewaySnapshot>
   setGatewayRunning(running: boolean): Promise<GatewaySnapshot>
   rotateGatewayKey(groupId: string): Promise<GatewaySnapshot>
+  copyKimiModelConfig(model: string): Promise<void>
   copyConnection(input: {
     groupId: string
     lanAddress?: string
@@ -384,5 +385,6 @@ export const IPC = {
   gatewaySave: 'gateway:save',
   gatewayRunning: 'gateway:running',
   connectionCopy: 'connection:copy',
+  kimiModelConfigCopy: 'model:copy-kimi-config',
   connectionRotate: 'connection:rotate'
 } as const

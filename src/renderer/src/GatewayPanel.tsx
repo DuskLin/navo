@@ -1,7 +1,9 @@
+import { autoMatchCatalog } from '../../shared/catalog-match'
 import { hasQuotaDisplay, hasQuotaWindow } from '../../shared/quota-display'
 import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import codexLogo from './assets/models/openai.svg'
 import { Modal } from './Modal'
+import { ModelListModal } from './ModelListModal'
 import {
   cloneElement,
   isValidElement,
@@ -73,7 +75,7 @@ import { ModelMappingEditor } from './ModelMappingEditor'
 import { KimiLogo } from './KimiLogo'
 import minimaxLogo from './assets/models/minimax.svg'
 import commandcodeLogo from './assets/models/commandcode-light.svg'
-import deepseekLogo from './assets/deepseek.svg'
+import deepseekLogo from './assets/models/deepseek.svg'
 import { LiveFlowPanel } from './LiveFlowPanel'
 import { UsageDashboard } from './UsageDashboard'
 import type { UsageStats } from '../../shared/usage'
@@ -818,6 +820,7 @@ export function GatewayPanel({
   onStatusChange: (status: GatewayStatus | undefined) => void
 }) {
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
+  const [modelListOpen, setModelListOpen] = useState(false)
   const [cardDisplay, setCardDisplay] = useState(readCardDisplay)
   const [settingsSection, setSettingsSection] = useState<
     'display' | 'accounts' | 'gateway' | 'dashboard' | 'kimi-desktop'
@@ -1018,6 +1021,14 @@ export function GatewayPanel({
               <button className="button" aria-pressed={false} onClick={() => setPage('settings')}>
                 <Settings2 size={15} />
                 设置
+              </button>
+              <button
+                className="button"
+                aria-haspopup="dialog"
+                onClick={() => setModelListOpen(true)}
+              >
+                <List size={15} />
+                可用模型
               </button>
               <span
                 className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
@@ -1771,6 +1782,9 @@ export function GatewayPanel({
             </section>
           </div>
         </div>
+      )}
+      {modelListOpen && (
+        <ModelListModal accounts={snapshot.accounts} close={() => setModelListOpen(false)} />
       )}
       {kimiImport && (
         <Modal
@@ -3069,6 +3083,7 @@ function ModelPriceEditor({
   const [catalogMatch, setCatalogMatch] = useState(input.catalogMatch)
   const [query, setQuery] = useState(input.catalogMatch?.model ?? input.model)
   const [searchOpen, setSearchOpen] = useState(false)
+  const automaticMatch = autoMatchCatalog(catalog?.entries ?? [], input.model, input.provider)
   const fallback = matchedModelPrice({ ...input, catalogMatch }, catalog)
   const results = searchOpen ? searchCatalogPrices(catalog?.entries ?? [], query) : []
   const [currency, setCurrency] = useState(input.currency)
@@ -3126,7 +3141,9 @@ function ModelPriceEditor({
             <p className="muted">
               {catalogMatch
                 ? `已匹配：${catalogMatch.provider} / ${catalogMatch.model}`
-                : '当前按供应商与模型 ID 自动匹配，可搜索并选择其他对应模型。'}
+                : automaticMatch
+                  ? `自动匹配：${automaticMatch.providerName} / ${automaticMatch.model}`
+                  : '尚未找到对应模型，可搜索并选择目录条目。'}
             </p>
             {catalogMatch && (
               <button
@@ -3141,7 +3158,7 @@ function ModelPriceEditor({
               <>
                 <Field
                   label="搜索 Models.dev 模型"
-                  hint="支持模型 ID、名称和供应商；可忽略连字符、空格等差异。不同供应商的价格可能不同。"
+                  hint="支持模型 ID、名称和供应商，忽略前缀、大小写和分隔符。同名条目优先选择有价格的来源；不同供应商价格可能不同。"
                 >
                   <input
                     type="search"
@@ -3176,7 +3193,7 @@ function ModelPriceEditor({
                             </small>
                             <small>
                               {priceFields
-                                .map(([key, label]) => `${label} ${entry[key] ?? 0}`)
+                                .map(([key, label]) => `${label} ${entry[key] ?? '未提供'}`)
                                 .join(' · ')}
                               {entry.tiered ? ' · 基础档价格' : ''}
                             </small>

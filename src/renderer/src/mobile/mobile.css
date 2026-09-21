@@ -1771,7 +1771,10 @@ html[data-theme='dark'] .provider-logo.minimax {
   background: var(--panel);
 }
 html[data-theme='dark'] .provider-logo.codex img,
-html[data-theme='dark'] .provider-logo.minimax img {
+html[data-theme='dark'] .provider-logo.minimax img,
+html[data-theme='dark'] .provider-logo.deepseek img,
+html[data-theme='dark'] .provider-logo.go img,
+html[data-theme='dark'] .provider-logo.kimi img {
   filter: invert(1);
 }
 

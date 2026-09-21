@@ -260,7 +260,11 @@ test('registry metadata preserves names and limits without prices, respects mapp
   assert.equal(models.alias.name, 'Kimi K3')
   assert.equal(models.alias.id, 'alias')
   assert.equal(models.alias.limit?.context, 1048576)
-  assert.deepEqual(models.unknown, { id: 'unknown', name: 'Unknown' })
+  assert.deepEqual(models.unknown, {
+    id: 'unknown',
+    name: 'Wrong provider',
+    limit: { context: 999999 }
+  })
   assert.equal(models['kimi-for-coding'].name, 'Kimi for Coding')
   const shared = registryModels(
     [...accounts, { provider: 'opencode-go', models: ['k3'] }],

@@ -12,15 +12,9 @@ import { object, validateModelPrice } from './gateway-store'
 
 export const MODEL_PRICE_API = 'https://models.dev/api.json'
 export const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000
-export const catalogProviders: Record<Provider, string> = {
-  custom: 'custom',
-  codex: 'openai',
-  kimi: 'kimi-for-coding',
-  deepseek: 'deepseek',
-  minimax: 'minimax-coding-plan',
-  'commandcode-goat': 'commandcode',
-  'opencode-go': 'opencode-go'
-}
+import { catalogProviders } from '../../shared/catalog-match'
+export { catalogProviders } from '../../shared/catalog-match'
+
 const amount = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000
     ? value

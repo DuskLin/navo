@@ -55,6 +55,7 @@ const api: HelperApi = {
   saveGateway: (input) => ipcRenderer.invoke(IPC.gatewaySave, input),
   setGatewayRunning: (running) => ipcRenderer.invoke(IPC.gatewayRunning, running),
   rotateGatewayKey: (groupId) => ipcRenderer.invoke(IPC.connectionRotate, groupId),
+  copyKimiModelConfig: (model) => ipcRenderer.invoke(IPC.kimiModelConfigCopy, model),
   copyConnection: (input) => ipcRenderer.invoke(IPC.connectionCopy, input)
 }
 contextBridge.exposeInMainWorld('navo', api)

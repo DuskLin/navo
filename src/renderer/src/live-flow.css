@@ -932,7 +932,7 @@
   border-color: #38516c;
 }
 
-:root .live-flow-panel .flow-model-brand img.model-logo {
+:root .live-flow-panel .flow-model-brand .model-logo {
   width: 30px;
   height: 30px;
   padding: 3px;
@@ -942,9 +942,10 @@
   border: 1px solid #cbdde9;
   filter: none;
 }
-:root .live-flow-panel .flow-model-brand img.model-logo[data-brand='kimi'] {
-  background: #111925;
-  border-color: #38516c;
+:root .live-flow-panel .flow-model-brand .model-logo[data-brand='kimi'] {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
 }
 
 .flow-node.harness {
@@ -993,7 +994,7 @@
   left: 10px;
   top: 26px;
 }
-:root .live-flow-panel .flow-model-brand img.model-logo {
+:root .live-flow-panel .flow-model-brand .model-logo {
   width: 25px;
   height: 25px;
   padding: 2px;
@@ -1208,7 +1209,6 @@
   margin-top: 10px;
 }
 
-:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='openai'],
-:root[data-theme='dark'] .live-flow-panel .flow-model-brand img.model-logo[data-brand='minimax'] {
+:root[data-theme='dark'] .live-flow-panel img.monochrome-logo {
   filter: invert(1);
 }
