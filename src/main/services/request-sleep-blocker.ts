@@ -1,6 +1,9 @@
 import type { AppSettings } from '../../shared/contracts'
 
-type Preferences = Pick<AppSettings, 'preventSleepDuringRequests' | 'sleepReleaseDelaySeconds'>
+type Preferences = Pick<
+  AppSettings,
+  'preventSleepDuringRequests' | 'sleepReleaseDelaySeconds' | 'sleepOnlyOnAC'
+>
 interface PowerBlocker {
   start(type: 'prevent-app-suspension'): number
   stop(id: number): boolean
@@ -13,6 +16,7 @@ export class RequestSleepBlocker {
   private idleSince: number | undefined
   private timer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
+  private onBatteryPower = false
 
   constructor(
     private readonly power: PowerBlocker,
@@ -21,6 +25,11 @@ export class RequestSleepBlocker {
 
   configure(preferences: Preferences): void {
     this.preferences = preferences
+    this.reconcile()
+  }
+
+  setOnBatteryPower(value: boolean): void {
+    this.onBatteryPower = value
     this.reconcile()
   }
 
@@ -34,7 +43,11 @@ export class RequestSleepBlocker {
   private reconcile(): void {
     clearTimeout(this.timer)
     this.timer = undefined
-    if (this.disposed || !this.preferences.preventSleepDuringRequests) {
+    if (
+      this.disposed ||
+      !this.preferences.preventSleepDuringRequests ||
+      (this.preferences.sleepOnlyOnAC && this.onBatteryPower)
+    ) {
       this.release()
       return
     }

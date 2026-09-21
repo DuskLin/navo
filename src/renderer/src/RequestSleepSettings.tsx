@@ -78,6 +78,13 @@ export function RequestSleepSettings() {
             disabled={busy}
             onChange={(preventSleepDuringRequests) => void save({ preventSleepDuringRequests })}
           />
+          <SettingsToggle
+            label="仅连接电源适配器时启用"
+            hint="使用电池时释放休眠限制；接回电源且仍有请求时恢复"
+            checked={settings.sleepOnlyOnAC}
+            disabled={busy || !settings.preventSleepDuringRequests}
+            onChange={(sleepOnlyOnAC) => void save({ sleepOnlyOnAC })}
+          />
           <label className="settings-toggle-row sleep-delay-row">
             <span>
               <strong>释放延迟</strong>
@@ -111,11 +118,15 @@ export function RequestSleepSettings() {
                 ? '系统休眠控制异常'
                 : protection.externallyDisabled
                   ? '系统原本已禁用睡眠，保留原设置'
-                  : !protection.authorized
-                    ? '尚未授权'
-                    : protection.active
-                      ? '系统睡眠已禁用'
-                      : '已授权，等待请求'}
+                  : settings?.preventSleepDuringRequests &&
+                      settings.sleepOnlyOnAC &&
+                      protection.onBatteryPower
+                    ? '电池供电，已暂停阻止休眠'
+                    : !protection.authorized
+                      ? '尚未授权'
+                      : protection.active
+                        ? '系统睡眠已禁用'
+                        : '已授权，等待请求'}
             </span>
             {settings?.preventSleepDuringRequests &&
               (!protection.authorized || protection.error) && (

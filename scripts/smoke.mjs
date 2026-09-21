@@ -445,6 +445,12 @@ try {
     async () => (await window.navo.getSettings()).preventSleepDuringRequests
   )
   await page.getByLabel('释放延迟', { exact: true }).selectOption('900')
+  const acOnlyToggle = page.getByRole('switch', { name: '仅连接电源适配器时启用', exact: true })
+  assert.equal(await acOnlyToggle.isChecked(), false)
+  await acOnlyToggle.click()
+  await page.waitForFunction(async () => (await window.navo.getSettings()).sleepOnlyOnAC)
+  await acOnlyToggle.click()
+  await page.waitForFunction(async () => !(await window.navo.getSettings()).sleepOnlyOnAC)
   await page.waitForFunction(
     async () => (await window.navo.getSettings()).sleepReleaseDelaySeconds === 900
   )
@@ -1111,6 +1117,7 @@ try {
   assert.equal(await application.evaluate(({ nativeTheme }) => nativeTheme.themeSource), 'dark')
   assert.deepEqual(JSON.parse(await readFile(join(userData, 'settings.json'), 'utf8')), {
     theme: 'dark',
+    sleepOnlyOnAC: false,
     preventSleepDuringRequests: false,
     sleepReleaseDelaySeconds: 60
   })

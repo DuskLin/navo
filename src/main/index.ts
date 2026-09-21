@@ -9,6 +9,7 @@ import {
   nativeTheme,
   net,
   powerSaveBlocker,
+  powerMonitor,
   safeStorage,
   shell
 } from 'electron'
@@ -50,6 +51,7 @@ let gateway: Gateway | undefined
 let requestSleepBlocker: RequestSleepBlocker | undefined
 let macSleepProtection: MacSleepProtection | undefined
 let stopSleepActivity: (() => void) | undefined
+let stopPowerMonitoring: (() => void) | undefined
 let dashboard: DashboardServer | undefined
 let usageService: UsageService | undefined
 let stopKimiQuotaExport: (() => void) | undefined
@@ -161,6 +163,21 @@ void app
           preventSleepDuringRequests: false
         })
       : undefined
+    if (requestSleepBlocker) {
+      const onBattery = () => requestSleepBlocker?.setOnBatteryPower(true)
+      const onAC = () => requestSleepBlocker?.setOnBatteryPower(false)
+      const refreshPower = () =>
+        requestSleepBlocker?.setOnBatteryPower(powerMonitor.isOnBatteryPower())
+      refreshPower()
+      powerMonitor.on('on-battery', onBattery)
+      powerMonitor.on('on-ac', onAC)
+      powerMonitor.on('resume', refreshPower)
+      stopPowerMonitoring = () => {
+        powerMonitor.off('on-battery', onBattery)
+        powerMonitor.off('on-ac', onAC)
+        powerMonitor.off('resume', refreshPower)
+      }
+    }
     stopSleepActivity = service.onActiveRequestsChange((count) =>
       requestSleepBlocker?.setActiveRequests(count)
     )
@@ -262,17 +279,16 @@ void app
       electron: process.versions.electron
     }))
     handle(IPC.settingsGet, () => settings.get())
-    handle(
-      IPC.sleepProtectionGet,
-      () =>
-        macSleepProtection?.snapshot() ?? {
-          mode: 'idle',
-          authorized: false,
-          active: false,
-          externallyDisabled: false,
-          error: ''
-        }
-    )
+    handle(IPC.sleepProtectionGet, () => ({
+      ...(macSleepProtection?.snapshot() ?? {
+        mode: 'idle',
+        authorized: false,
+        active: false,
+        externallyDisabled: false,
+        error: ''
+      }),
+      onBatteryPower: powerMonitor.isOnBatteryPower()
+    }))
     handle(IPC.migrationChooseDirectory, async (currentPath) => {
       const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       const options: Electron.OpenDialogOptions = {
@@ -497,6 +513,7 @@ app.on('before-quit', (event) => {
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
   stopSleepActivity?.()
+  stopPowerMonitoring?.()
   requestSleepBlocker?.dispose()
   macSleepProtection?.invalidate()
   stopKimiQuotaExport?.()

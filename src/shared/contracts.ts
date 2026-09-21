@@ -3,10 +3,12 @@ export type Theme = 'light' | 'dark'
 export interface AppSettings {
   theme: Theme
   preventSleepDuringRequests: boolean
+  sleepOnlyOnAC: boolean
   sleepReleaseDelaySeconds: number
 }
 
 export interface SleepProtectionState {
+  onBatteryPower?: boolean
   mode: 'system' | 'idle'
   authorized: boolean
   active: boolean

@@ -5,6 +5,7 @@ import type { AppSettings } from '../../shared/contracts'
 export const defaultSettings: AppSettings = {
   theme: 'light',
   preventSleepDuringRequests: false,
+  sleepOnlyOnAC: false,
   sleepReleaseDelaySeconds: 60
 }
 
@@ -15,6 +16,8 @@ export function validateSettings(value: unknown): AppSettings {
     throw new Error('设置包含无效选项')
   }
   const enabled = settings.preventSleepDuringRequests ?? false
+  const onlyOnAC = settings.sleepOnlyOnAC ?? false
+  if (typeof onlyOnAC !== 'boolean') throw new Error('电源适配器限制设置无效')
   const previousDelay = settings.sleepReleaseDelaySeconds ?? 60
   // Migrate the retired 30-second and 3-minute presets to the next available tier.
   const delay = previousDelay === 30 ? 60 : previousDelay === 180 ? 300 : previousDelay
@@ -24,6 +27,7 @@ export function validateSettings(value: unknown): AppSettings {
   return {
     theme: settings.theme,
     preventSleepDuringRequests: enabled,
+    sleepOnlyOnAC: onlyOnAC,
     sleepReleaseDelaySeconds: delay
   }
 }
