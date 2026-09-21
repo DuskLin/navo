@@ -164,19 +164,23 @@ test(
   }
 )
 
-test('authorization cancellation leaves sleep protection disabled and can be retried', async () => {
-  let attempts = 0
-  const protection = new MacSleepProtection(async () => {
-    attempts++
-    throw new Error('授权已取消')
-  })
-  await assert.rejects(protection.prepare(), /授权已取消/)
-  assert.equal(protection.snapshot().authorized, false)
-  assert.equal(protection.snapshot().error, '授权已取消')
-  await assert.rejects(protection.prepare())
-  assert.equal(attempts, 2)
-  await protection.close()
-})
+test(
+  'authorization cancellation leaves sleep protection disabled and can be retried',
+  { skip: process.platform !== 'darwin' },
+  async () => {
+    let attempts = 0
+    const protection = new MacSleepProtection(async () => {
+      attempts++
+      throw new Error('授权已取消')
+    })
+    await assert.rejects(protection.prepare(), /授权已取消/)
+    assert.equal(protection.snapshot().authorized, false)
+    assert.equal(protection.snapshot().error, '授权已取消')
+    await assert.rejects(protection.prepare())
+    assert.equal(attempts, 2)
+    await protection.close()
+  }
+)
 
 test(
   'failed pmset activation is surfaced and rolled back',

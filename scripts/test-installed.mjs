@@ -59,9 +59,20 @@ async function launch() {
   await page.getByRole('button', { name: '设置', exact: true, includeHidden: true }).waitFor()
   assert.equal(await application.evaluate(({ app }) => app.isPackaged), true)
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined')
-  await application.evaluate(async (_electron, base) => {
+  await application.evaluate(async ({ session, net }, base) => {
     // Services capture fetch during construction; intercept its shared HTTP
     // dispatcher instead of replacing business logic or the saved credentials.
+    // Account discovery now uses Electron's network stack; route its metadata
+    // requests to the same local upstream as Node's gateway transport.
+    session.defaultSession.protocol.handle('https', (request) => {
+      const url = new URL(request.url)
+      if (url.hostname !== 'api.deepseek.com')
+        return net.fetch(request, { bypassCustomProtocolHandlers: true })
+      return net.fetch(base + url.pathname + url.search, {
+        method: request.method,
+        headers: request.headers
+      })
+    })
     await fetch('data:text/plain,initialize-fetch')
     const key = Symbol.for('undici.globalDispatcher.1')
     const dispatcher = globalThis[key]
