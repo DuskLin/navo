@@ -81,11 +81,12 @@ export function formatTokens(tokens: number) {
   return tokens >= 1000000 ? `${(tokens / 1000000).toFixed(2)}M` : `${(tokens / 1000).toFixed(0)}K`
 }
 export const PROVIDER_NAMES: Record<Provider, string> = {
-  '自定义供应商': '自定义供应商',
+  自定义供应商: '自定义供应商',
   Kimi: 'Kimi Code',
   DeepSeek: '按量付费',
   Go: 'OpenCode Go',
   MiniMax: 'Token Plan',
+  'Command Code': 'GOAT Plan',
   Codex: 'OpenAI · Codex'
 }
 export const DASHBOARD_PROVIDERS = Object.keys(PROVIDER_NAMES) as Provider[]

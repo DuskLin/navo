@@ -74,7 +74,15 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
-export const PROVIDERS = ['kimi', 'deepseek', 'opencode-go', 'codex', 'minimax', 'custom'] as const
+export const PROVIDERS = [
+  'kimi',
+  'deepseek',
+  'opencode-go',
+  'codex',
+  'minimax',
+  'commandcode-goat',
+  'custom'
+] as const
 export type Provider = (typeof PROVIDERS)[number]
 export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
@@ -133,6 +141,7 @@ export interface AccountModelTestResult {
   text: string
 }
 export interface AccountCapabilities {
+  modelProtocols?: Record<string, ModelProtocol[]>
   balance?: AccountBalance | null
   models: string[]
   maxConcurrency: number | null
@@ -148,7 +157,9 @@ export interface QuotaWindow {
 }
 export interface AccountQuota {
   monthly?: QuotaWindow | null
-  unit?: 'percent'
+  unit?: 'percent' | 'USD'
+  /** Purchased and free credits available after Command Code plan limits. */
+  extraCredits?: number
   fiveHour: QuotaWindow | null
   weekly: QuotaWindow | null
   total: QuotaWindow | null
@@ -187,6 +198,7 @@ export function accountBaseUrl(
   if (provider === 'custom') return normalizeCustomBaseUrl(baseUrl)
   if (provider === 'minimax')
     return region === 'global' ? 'https://api.minimax.io/v1' : 'https://api.minimaxi.com/v1'
+  if (provider === 'commandcode-goat') return 'https://api.commandcode.ai/provider/v1'
   if (provider === 'codex') return 'https://chatgpt.com/backend-api/codex'
   if (provider === 'opencode-go') return 'https://opencode.ai/zen/go/v1'
   return provider === 'deepseek' ? 'https://api.deepseek.com/v1' : kimiBaseUrl(region)

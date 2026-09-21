@@ -227,6 +227,21 @@ iPad 竖屏采用双列卡片，横屏展开为三列；同排卡片等高，额
 </details>
 
 <details>
+<summary>添加 Command Code GOAT Plan</summary>
+
+在「设置 → 账号管理 → 添加账号」选择「Command Code · GOAT Plan」，填写 Command Code Studio 生成的 API Key。需订阅 GOAT 或更高套餐；Go 套餐不支持 API。
+
+使用官方 `https://api.commandcode.ai/provider/v1`，自动同步模型及 `supported_endpoints`，网关按模型选择 Messages、Responses 或 Chat Completions，并沿用协议转换。支持手动模型和协议覆盖。
+
+使用同一 API Key 查询官方 CLI 使用的 alpha 接口：`whoami` 获取组织身份，`billing/credits` 同步 5 小时／周窗口、月剩余和充值／免费额度，`billing/subscriptions` 提供重置账期，`usage/summary` 按账期读取花费。鉴权失败阻止保存，辅助接口失败时保留可读取的额度并提示。套餐窗口耗尽但仍有充值／免费额度时继续参与调度。
+
+模型目录是公开列表，可能包含套餐无权访问的模型，请通过模型测试确认。月额度上限未由接口明确给出时仅展示剩余额度，不把账期总花费推算为套餐已用额度。
+
+参考：[GOAT Plan](https://commandcode.ai/docs/plans/goat)、[Provider API](https://commandcode.ai/docs/provider)。
+
+</details>
+
+<details>
 <summary>添加 MiniMax Token Plan</summary>
 
 在「设置 → 账号管理 → 添加账号」选择「MiniMax · Token Plan」，选择套餐所属中国区或国际区，填写 Subscription Key。保存后同步模型列表、5 小时与周剩余额度；周窗口仅在上游启用时展示，额度耗尽的账号暂停参与调度。

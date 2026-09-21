@@ -1817,3 +1817,8 @@ html[data-theme='dark'] .provider-logo.minimax img {
     margin-right: 2px;
   }
 }
+
+/* Official symbol variants: black edge on light surfaces, white edge on dark. */
+:root[data-theme='dark'] img.commandcode-logo {
+  content: url('../assets/models/commandcode.svg');
+}

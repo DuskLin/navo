@@ -12,7 +12,15 @@ const server = createServer((req, res) => {
   assert.equal(req.headers.authorization, 'Bearer custom-smoke-key')
   res.setHeader('content-type', 'application/json')
   if (req.url === '/custom/v1/models') res.end(JSON.stringify({ data: [{ id: 'auto-model' }] }))
-  else {
+  else if (req.url === '/custom/v1/chat/completions') {
+    setTimeout(
+      () =>
+        res.end(
+          JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] })
+        ),
+      800
+    )
+  } else {
     res.writeHead(404)
     res.end('{}')
   }
@@ -57,6 +65,21 @@ try {
       true
     )
     assert.equal(await dialog.getByLabel('manual-one Messages', { exact: true }).isChecked(), false)
+    if (mode === 'automatic') {
+      const testButton = dialog.getByRole('button', { name: '测试模型 auto-model', exact: true })
+      await testButton.click()
+      await page.waitForFunction(
+        () => document.querySelector('.model-test-controls button')?.textContent === '测试中…'
+      )
+      // A parent render while the request is pending must not discard its result.
+      await dialog.getByLabel('手动添加模型', { exact: true }).fill('pending-rerender')
+      const result = dialog.locator('.model-test-result summary').filter({ hasText: '成功' })
+      await result.waitFor()
+      await dialog.getByLabel('手动添加模型', { exact: true }).fill('')
+      assert.equal(await result.isVisible(), true)
+      await result.click()
+      await dialog.locator('.model-test-result p').getByText('OK', { exact: true }).waitFor()
+    }
     await mkdir(resolve('artifacts'), { recursive: true })
     await page.screenshot({ path: resolve(`artifacts/custom-ai-${mode}.png`) })
     await dialog.getByRole('button', { name: '保存账号', exact: true }).click()
@@ -69,7 +92,10 @@ try {
   assert.deepEqual(snapshot.accounts[1].models, ['manual-one', 'manual-two'])
   assert.equal(snapshot.accounts[1].baseUrl, `${baseUrl}/manual`)
   assert.ok(calls.length > 0)
-  assert.ok(calls.every((url) => url === '/custom/v1/models'))
+  assert.ok(
+    calls.every((url) => ['/custom/v1/models', '/custom/v1/chat/completions'].includes(url))
+  )
+  assert.equal(calls.filter((url) => url === '/custom/v1/chat/completions').length, 1)
   assert.deepEqual(errors, [])
   console.log('通过：自定义 URL / Key、自动获取、手动批量模型、默认协议、保存及重新加载。')
 } finally {

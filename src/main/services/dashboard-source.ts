@@ -3,7 +3,7 @@ import type { Gateway } from './gateway'
 import type { UsageService } from './usage-service'
 import type { Provider } from '../../shared/contracts'
 import type { DashboardAccount, DashboardSnapshot } from '../../shared/dashboard'
-import { storedQuota } from '../../shared/kimi-quota'
+import { hasCommandCodeExtraCredits, storedQuota } from '../../shared/kimi-quota'
 
 const providerLabels: Record<Provider, DashboardAccount['provider']> = {
   custom: '自定义供应商',
@@ -11,6 +11,7 @@ const providerLabels: Record<Provider, DashboardAccount['provider']> = {
   deepseek: 'DeepSeek',
   'opencode-go': 'Go',
   minimax: 'MiniMax',
+  'commandcode-goat': 'Command Code',
   codex: 'Codex'
 }
 
@@ -68,9 +69,10 @@ export function dashboardSource(gateway: Gateway, usage: UsageService) {
                 ? ('error' as const)
                 : !cap || now - cap.checkedAt > 120000
                   ? ('stale' as const)
-                  : cap.quota?.fiveHour?.remaining === 0 ||
-                      cap.quota?.weekly?.remaining === 0 ||
-                      cap.quota?.monthly?.remaining === 0 ||
+                  : ((cap.quota?.fiveHour?.remaining === 0 ||
+                        cap.quota?.weekly?.remaining === 0 ||
+                        cap.quota?.monthly?.remaining === 0) &&
+                        !hasCommandCodeExtraCredits(a.provider, cap.quota, cap.checkedAt, now)) ||
                       cap.balance?.available === false
                     ? ('exhausted' as const)
                     : ('available' as const),

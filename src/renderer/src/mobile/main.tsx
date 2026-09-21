@@ -38,6 +38,7 @@ import {
 import logo from '../assets/navo-logo.png'
 import kimi from '../assets/kimi.svg'
 import minimax from '../assets/models/minimax.svg'
+import commandcode from '../assets/models/commandcode-light.svg'
 import deepseek from '../assets/deepseek.svg'
 import openai from '../assets/models/openai.svg'
 import go from '../assets/models/opencode.svg'
@@ -64,10 +65,16 @@ function Identity({ account }: { account: DashboardAccount }) {
           <span>AI</span>
         ) : (
           <img
+            className={account.provider === 'Command Code' ? 'commandcode-logo' : undefined}
             src={
-              { Kimi: kimi, DeepSeek: deepseek, Go: go, MiniMax: minimax, Codex: openai }[
-                account.provider
-              ]
+              {
+                Kimi: kimi,
+                DeepSeek: deepseek,
+                Go: go,
+                MiniMax: minimax,
+                Codex: openai,
+                'Command Code': commandcode
+              }[account.provider]
             }
             alt=""
           />
@@ -96,7 +103,10 @@ function Meter({
       <div className="meter-title">
         <span>{label}</span>
         <strong>
-          {remaining ?? '—'}
+          {remaining ??
+            (value?.remaining != null
+              ? value.remaining.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+              : '—')}
           {remaining !== null && <small>%</small>}
         </strong>
       </div>
@@ -468,7 +478,11 @@ function App({
                   <section className="panel window-panel">
                     <Meter value={account.quota?.weekly} label="本周剩余额度" now={now} />
                     {account.quota?.monthly && (
-                      <Meter value={account.quota.monthly} label="本月剩余额度" now={now} />
+                      <Meter
+                        value={account.quota.monthly}
+                        label={account.quota.unit === 'USD' ? '本月剩余额度 (USD)' : '本月剩余额度'}
+                        now={now}
+                      />
                     )}
                   </section>
                 )}
@@ -587,7 +601,13 @@ function App({
                       {a.quota?.monthly && (
                         <div className="monthly">
                           <span>本月剩余</span>
-                          <strong>{percent(a.quota?.monthly)}%</strong>
+                          <strong>
+                            {percent(a.quota?.monthly) !== null
+                              ? `${percent(a.quota?.monthly)}%`
+                              : a.quota?.unit === 'USD' && a.quota.monthly?.remaining != null
+                                ? `USD ${a.quota.monthly.remaining.toFixed(2)}`
+                                : '—'}
+                          </strong>
                           <span>{countdown(a.quota?.monthly, now)}</span>
                         </div>
                       )}

@@ -18,6 +18,7 @@ export const catalogProviders: Record<Provider, string> = {
   kimi: 'kimi-for-coding',
   deepseek: 'deepseek',
   minimax: 'minimax-coding-plan',
+  'commandcode-goat': 'commandcode',
   'opencode-go': 'opencode-go'
 }
 const amount = (value: unknown): number | null =>

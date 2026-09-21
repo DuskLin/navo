@@ -28,3 +28,5 @@ Icons retain original colors. Kimi's white mark uses a dark plate in both themes
 OpenAI 和 Codex 共用用户提供的 `/Users/liujialin/Downloads/openai.svg`；资源原样保存，深色主题通过 CSS 反色显示。
 
 MiniMax 使用用户提供的 `/Users/liujialin/Downloads/minimax.svg`，原样保存；账号、模型及手机看板的图标在浅色主题为黑色，深色主题为白色。
+
+Command Code 使用[官方品牌资源页](https://commandcode.ai/brand)提供的 [symbol.svg](https://raw.githubusercontent.com/CommandCodeAI/command-code/refs/heads/main/.github/commandcode/symbols/symbol.svg)，保存为 `commandcode.svg`（2026-09-21）。原样保留官方颜色与比例，用于桌面账号和手机看板，不应用反色滤镜。浅色主题使用官方 [black-symbol-commandcode.svg](https://raw.githubusercontent.com/CommandCodeAI/command-code/refs/heads/main/.github/commandcode/symbols/black-symbol-commandcode.svg)（保存为 `commandcode-light.svg`），深色主题切换为带白色边框的 `commandcode.svg`。

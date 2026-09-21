@@ -65,11 +65,12 @@ import {
 import { useQuotaCardDrag } from './useQuotaCardDrag'
 import { requestCost, requestCostDetails } from '../../shared/request-cost'
 import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
-import { remainingRatio } from '../../shared/kimi-quota'
+import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
 import { KimiLogo } from './KimiLogo'
 import minimaxLogo from './assets/models/minimax.svg'
+import commandcodeLogo from './assets/models/commandcode-light.svg'
 import deepseekLogo from './assets/deepseek.svg'
 import { LiveFlowPanel } from './LiveFlowPanel'
 import { UsageDashboard } from './UsageDashboard'
@@ -340,6 +341,16 @@ function PerformanceHistory({
   )
 }
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
+  if (provider === 'commandcode-goat')
+    return (
+      <img
+        className="commandcode-logo"
+        src={commandcodeLogo}
+        width={24}
+        height={24}
+        alt="Command Code"
+      />
+    )
   if (provider === 'custom') return <span aria-label="自定义供应商">AI</span>
   if (provider === 'codex')
     return <img className="openai-logo" src={codexLogo} width={20} height={20} alt="Codex" />
@@ -435,14 +446,25 @@ function accountStatus(a: AccountView): { text: string; className: string } {
       a.capabilities.quota?.fiveHour,
       a.capabilities.quota?.weekly,
       a.capabilities.quota?.monthly
-    ].some((window) => remainingRatio(window, a.capabilities!.checkedAt, Date.now()) === 0)
+    ].some((window) => remainingRatio(window, a.capabilities!.checkedAt, Date.now()) === 0) &&
+    !hasCommandCodeExtraCredits(
+      a.provider,
+      a.capabilities.quota,
+      a.capabilities.checkedAt,
+      Date.now()
+    )
   )
     return { text: '额度耗尽', className: 'warning' }
   return { text: a.runtime.active ? '处理中' : '可调度', className: 'healthy' }
 }
-function quotaRemaining(window: QuotaWindow | null | undefined, unit?: 'percent'): string {
+function quotaRemaining(
+  window: QuotaWindow | null | undefined,
+  unit?: AccountQuota['unit']
+): string {
   const format = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+  if (unit === 'USD')
+    return `USD ${format(window?.remaining)}${window?.limit == null ? '' : ` / ${format(window.limit)}`}`
   return unit === 'percent'
     ? `${format(window?.remaining)}%`
     : `${format(window?.remaining)} / ${format(window?.limit)}`
@@ -540,7 +562,11 @@ function QuotaDetails({
                   className="remaining-percent"
                   title={`剩余 ${quotaRemaining(window, quota?.unit)}`}
                 >
-                  {percent === null ? '—' : `${Number(percent.toFixed(1))}%`}
+                  {percent === null
+                    ? quota?.unit === 'USD'
+                      ? quotaRemaining(window, quota.unit)
+                      : '—'
+                    : `${Number(percent.toFixed(1))}%`}
                 </b>
               )}
               {!overview && <span>剩余 {quotaRemaining(window, quota?.unit)}</span>}
@@ -618,9 +644,18 @@ function QuotaDetails({
           onSnapshot={onSnapshot}
         />
       )}
+      {quota?.extraCredits !== undefined && (
+        <small>充值 / 免费额度：USD {quota.extraCredits.toFixed(2)}</small>
+      )}
+      {!overview && quota?.unit === 'USD' && quota.total?.used != null && (
+        <small>本账期花费：USD {quota.total.used.toFixed(2)}</small>
+      )}
       {!overview && (quota?.total || quota?.totalUnlimited) && (
         <small>
-          总额度：{quota.totalUnlimited ? '无总额度限制' : `剩余 ${quotaRemaining(quota.total)}`}
+          总额度：
+          {quota.totalUnlimited
+            ? '无总额度限制'
+            : `剩余 ${quotaRemaining(quota.total, quota.unit)}`}
         </small>
       )}
     </section>
@@ -1377,13 +1412,15 @@ export function GatewayPanel({
                                             ? 'Codex · 本地认证'
                                             : account.provider === 'custom'
                                               ? '自定义供应商'
-                                              : account.provider === 'minimax'
-                                                ? `MiniMax · Token Plan · ${account.region === 'global' ? '国际区' : '中国区'}`
-                                                : account.provider === 'opencode-go'
-                                                  ? 'OpenCode Go · 订阅'
-                                                  : account.provider === 'deepseek'
-                                                    ? 'DeepSeek · 按量付费'
-                                                    : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
+                                              : account.provider === 'commandcode-goat'
+                                                ? 'Command Code · GOAT Plan'
+                                                : account.provider === 'minimax'
+                                                  ? `MiniMax · Token Plan · ${account.region === 'global' ? '国际区' : '中国区'}`
+                                                  : account.provider === 'opencode-go'
+                                                    ? 'OpenCode Go · 订阅'
+                                                    : account.provider === 'deepseek'
+                                                      ? 'DeepSeek · 按量付费'
+                                                      : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
                                         </small>
                                       </div>
                                     </div>
@@ -1899,7 +1936,13 @@ export function GatewayPanel({
   )
 }
 
-function ModelTestCell({ draft, model }: { draft: AccountInput; model: string }) {
+function ModelTestCell({
+  draft,
+  model
+}: {
+  draft: AccountInput & { capabilities?: AccountCapabilities | null }
+  model: string
+}) {
   const protocols = supportedModelProtocols(draft, model)
   const [chosen, setChosen] = useState<ModelProtocol | ''>('')
   const protocol = protocols.includes(chosen as ModelProtocol)
@@ -1917,7 +1960,9 @@ function ModelTestCell({ draft, model }: { draft: AccountInput; model: string })
     return () => {
       version.current++
     }
-  }, [draft, protocol])
+    // Parent snapshots and quota refreshes recreate draft objects. Only invalidate
+    // a probe when its actual target or credentials change, not on every render.
+  }, [draft.id, draft.provider, draft.baseUrl, draft.region, draft.secret, model, protocol])
   async function testModel() {
     if (pending.current || !protocol) return
     pending.current = true
@@ -2165,6 +2210,7 @@ function AccountEditor({
                 {(!input.id || (input.provider === 'kimi' && input.kind === 'oauth')) && (
                   <option value="kimi-local">Kimi Code · 本地登录态</option>
                 )}
+                <option value="commandcode-goat">Command Code · GOAT Plan</option>
                 <option value="minimax">MiniMax · Token Plan</option>
                 <option value="deepseek">DeepSeek · 按量付费</option>
                 <option value="opencode-go">OpenCode Go · 订阅</option>
@@ -2193,15 +2239,17 @@ function AccountEditor({
                 hint={
                   input.id
                     ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
-                    : draft.provider === 'minimax'
-                      ? '填写 MiniMax Token Plan 的 Subscription Key（套餐密钥）。'
-                      : draft.provider === 'opencode-go'
-                        ? '填写已订阅 Go 的 OpenCode API Key。'
-                        : draft.provider === 'deepseek'
-                          ? '填写 DeepSeek 开放平台生成的密钥。'
-                          : draft.provider === 'custom'
-                            ? '填写自定义供应商的 API Key。'
-                            : '填写 Kimi Code 控制台生成的密钥。'
+                    : draft.provider === 'commandcode-goat'
+                      ? '填写 Command Code Studio 生成的 API Key，需订阅 GOAT 或更高套餐。'
+                      : draft.provider === 'minimax'
+                        ? '填写 MiniMax Token Plan 的 Subscription Key（套餐密钥）。'
+                        : draft.provider === 'opencode-go'
+                          ? '填写已订阅 Go 的 OpenCode API Key。'
+                          : draft.provider === 'deepseek'
+                            ? '填写 DeepSeek 开放平台生成的密钥。'
+                            : draft.provider === 'custom'
+                              ? '填写自定义供应商的 API Key。'
+                              : '填写 Kimi Code 控制台生成的密钥。'
                 }
               >
                 <input
@@ -2453,7 +2501,7 @@ function AccountEditor({
                     </thead>
                     <tbody>
                       {visibleModels.map((model) => {
-                        const selected = supportedModelProtocols(draft, model)
+                        const selected = supportedModelProtocols({ ...draft, capabilities }, model)
                         return (
                           <tr key={model}>
                             <th scope="row" title={model}>
@@ -2481,7 +2529,7 @@ function AccountEditor({
                                 />
                               </td>
                             ))}
-                            <ModelTestCell draft={draft} model={model} />
+                            <ModelTestCell draft={{ ...draft, capabilities }} model={model} />
                             <td>
                               <button
                                 type="button"
@@ -2773,6 +2821,7 @@ const providerNames = {
   kimi: 'Kimi Code',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  'commandcode-goat': 'Command Code',
   'opencode-go': 'OpenCode Go'
 }
 

@@ -77,8 +77,22 @@ export function storedQuota(value: unknown): AccountQuota | null {
     fiveHour: quotaWindow(data.fiveHour),
     weekly: quotaWindow(data.weekly),
     ...(data.monthly !== undefined ? { monthly: quotaWindow(data.monthly) } : {}),
-    ...(data.unit === 'percent' ? { unit: 'percent' as const } : {}),
+    ...(data.unit === 'percent' || data.unit === 'USD' ? { unit: data.unit } : {}),
+    ...(number(data.extraCredits) !== null ? { extraCredits: number(data.extraCredits)! } : {}),
     total: quotaWindow(data.total),
     totalUnlimited: data.totalUnlimited === true
   }
+}
+
+export function hasCommandCodeExtraCredits(
+  provider: string | undefined,
+  quota: AccountQuota | null | undefined,
+  checkedAt: number,
+  now: number
+): boolean {
+  return (
+    provider === 'commandcode-goat' &&
+    now - checkedAt <= QUOTA_MAX_AGE_MS &&
+    (quota?.extraCredits ?? 0) > 0
+  )
 }

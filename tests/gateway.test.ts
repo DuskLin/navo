@@ -2942,3 +2942,94 @@ test('custom manual accounts save, reload, test and forward without a model disc
     await f.cleanup()
   }
 })
+
+test('Command Code GOAT persists endpoint metadata and forwards with provider prefix and bearer key', async () => {
+  const f = await storeFixture()
+  const calls: string[] = []
+  const gateway = f.createGateway(
+    async (url, init) => {
+      calls.push(String(url))
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret-goat')
+      return Response.json({ ok: true })
+    },
+    async (url) => {
+      if (String(url).endsWith('/whoami')) return Response.json({ user: { id: 'user' } })
+      if (String(url).endsWith('/billing/subscriptions')) return Response.json({ data: null })
+      if (String(url).endsWith('/billing/credits'))
+        return Response.json({
+          credits: { monthlyCredits: 20, purchasedCredits: 0, freeCredits: 0 }
+        })
+      assert.equal(String(url), 'https://api.commandcode.ai/provider/v1/models')
+      return Response.json({
+        data: [
+          { id: 'claude-test', supported_endpoints: ['/messages'] },
+          { id: 'open-test', supported_endpoints: ['/chat/completions', '/responses'] }
+        ]
+      })
+    }
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({ ...accountInput('goat'), provider: 'commandcode-goat' })
+    const account = f.store.get().accounts[0]
+    assert.equal(account.baseUrl, 'https://api.commandcode.ai/provider/v1')
+    assert.equal(account.capabilities?.quota?.monthly?.remaining, 20)
+    assert.match(account.capabilities!.warning, /公开列表/)
+    assert.deepEqual(account.capabilities?.modelProtocols, {
+      'claude-test': ['messages'],
+      'open-test': ['responses', 'chat-completions']
+    })
+    const loaded = new GatewayStore(f.file, f.secrets)
+    await loaded.load()
+    assert.deepEqual(loaded.get().accounts, f.store.get().accounts)
+    await gateway.refreshAccount(account.id)
+    assert.deepEqual(
+      f.store.get().accounts[0].capabilities?.modelProtocols,
+      account.capabilities?.modelProtocols
+    )
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    for (const [route, model] of [
+      ['/v1/messages', 'claude-test'],
+      ['/v1/responses', 'open-test'],
+      ['/v1/chat/completions', 'open-test']
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${reserved.port}${route}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${f.store.get().groups[0].key}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'hi' }],
+          input: 'hi',
+          max_tokens: 10
+        })
+      })
+      assert.equal(response.status, 200)
+      await response.text()
+      assert.equal(calls.at(-1), `https://api.commandcode.ai/provider${route}`)
+    }
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('Command Code extra credits keep exhausted plan windows schedulable until depleted', () => {
+  const now = Date.now()
+  const scheduler = new Scheduler(() => now)
+  const a = account('commandcode')
+  a.provider = 'commandcode-goat'
+  setQuota(a, 0, 0, now)
+  a.capabilities!.quota!.extraCredits = 5
+  const lease = scheduler.acquire([a], group, 'm', '', new Set())
+  assert.ok(lease)
+  lease.release()
+  a.capabilities!.quota!.extraCredits = 0
+  assert.equal(scheduler.acquire([a], group, 'm', '', new Set()), undefined)
+  a.capabilities!.quota!.extraCredits = 5
+  a.provider = 'kimi'
+  assert.equal(scheduler.acquire([a], group, 'm', '', new Set()), undefined)
+})

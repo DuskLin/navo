@@ -1,4 +1,4 @@
-import type { AccountInput, ModelProtocol } from './contracts'
+import type { AccountCapabilities, AccountInput, ModelProtocol } from './contracts'
 import { openCodeGoRoute } from './opencode-go'
 
 export const MODEL_PROTOCOLS: { value: ModelProtocol; label: string; route: string }[] = [
@@ -6,11 +6,15 @@ export const MODEL_PROTOCOLS: { value: ModelProtocol; label: string; route: stri
   { value: 'responses', label: 'Responses', route: '/v1/responses' },
   { value: 'chat-completions', label: 'Completions', route: '/v1/chat/completions' }
 ]
-type Configuration = Pick<AccountInput, 'provider' | 'modelProtocols'>
+type Configuration = Pick<AccountInput, 'provider' | 'modelProtocols'> & {
+  capabilities?: AccountCapabilities | null
+}
 export function defaultModelProtocols(
   provider: AccountInput['provider'],
   model: string
 ): ModelProtocol[] {
+  if (provider === 'commandcode-goat')
+    return /^(?:anthropic\/)?claude-/i.test(model) ? ['messages'] : ['chat-completions']
   if (provider === 'custom') return ['chat-completions']
   if (provider === 'codex') return ['responses']
   return provider === 'opencode-go'
@@ -21,7 +25,11 @@ export function supportedModelProtocols(account: Configuration, model: string): 
   if (account.provider === 'codex') return ['responses']
   return account.modelProtocols && Object.hasOwn(account.modelProtocols, model)
     ? account.modelProtocols[model]
-    : defaultModelProtocols(account.provider, model)
+    : account.provider === 'commandcode-goat' &&
+        account.capabilities?.modelProtocols &&
+        Object.hasOwn(account.capabilities.modelProtocols, model)
+      ? account.capabilities.modelProtocols[model]
+      : defaultModelProtocols(account.provider, model)
 }
 export function modelUpstreamRoute(
   account: Configuration,

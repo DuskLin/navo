@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AccountRuntime } from '../../shared/contracts'
-import { remainingRatio } from '../../shared/kimi-quota'
+import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
 import type { StoredAccount, StoredGroup } from './gateway-store'
 
 export class Scheduler {
@@ -85,7 +85,16 @@ export class Scheduler {
         account.capabilities.checkedAt,
         now
       )
-      if (fiveHour === 0 || weekly === 0 || monthly === 0) return []
+      if (
+        (fiveHour === 0 || weekly === 0 || monthly === 0) &&
+        !hasCommandCodeExtraCredits(
+          account.provider,
+          account.capabilities.quota,
+          account.capabilities.checkedAt,
+          now
+        )
+      )
+        return []
       return [{ account, state, fiveHour, weekly, score: 0 }]
     })
     if (!candidates.length) return

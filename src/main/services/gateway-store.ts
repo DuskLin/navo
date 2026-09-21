@@ -230,6 +230,9 @@ export function capabilityFields(
       throw new Error('上游模型列表无效')
     capabilities = {
       models: [...new Set(data.models.map((model) => string(model, '模型', 200)))],
+      ...(data.modelProtocols !== undefined
+        ? { modelProtocols: validateModelProtocols(data.modelProtocols) }
+        : {}),
       maxConcurrency:
         data.maxConcurrency === null
           ? null

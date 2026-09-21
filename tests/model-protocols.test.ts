@@ -155,3 +155,30 @@ test('所有 API Key 供应商保留手动模型，支持刷新、去重、删�
     }
   }
 })
+
+test('Command Code routes by discovered endpoints, preserves overrides and uses conservative defaults', () => {
+  const account = {
+    provider: 'commandcode-goat' as const,
+    capabilities: {
+      models: ['open', 'claude'],
+      maxConcurrency: null,
+      checkedAt: 1,
+      warning: '',
+      modelProtocols: validateModelProtocols({
+        open: ['responses', 'chat-completions'],
+        claude: ['messages'],
+        special: ['responses']
+      })
+    }
+  }
+  assert.equal(modelUpstreamRoute(account, 'open', '/v1/messages'), '/v1/chat/completions')
+  assert.equal(modelUpstreamRoute(account, 'open', '/v1/responses'), '/v1/responses')
+  assert.equal(modelUpstreamRoute(account, 'claude', '/v1/responses'), '/v1/messages')
+  assert.equal(modelUpstreamRoute(account, 'special', '/v1/chat/completions'), '/v1/responses')
+  assert.deepEqual(supportedModelProtocols(account, 'anthropic/claude-manual'), ['messages'])
+  assert.deepEqual(supportedModelProtocols(account, 'unknown'), ['chat-completions'])
+  assert.deepEqual(
+    supportedModelProtocols({ ...account, modelProtocols: { open: ['messages'] } }, 'open'),
+    ['messages']
+  )
+})

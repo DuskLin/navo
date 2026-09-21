@@ -2835,3 +2835,8 @@ input.account-policy-switch[role='switch'] {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* Official symbol variants: black edge on light surfaces, white edge on dark. */
+:root[data-theme='dark'] img.commandcode-logo {
+  content: url('./assets/models/commandcode.svg');
+}
