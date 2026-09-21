@@ -1,5 +1,19 @@
 import type { UpdateState } from '../../shared/updates'
 
+interface ReleaseInfo {
+  version: string
+  releaseNotes?: string | Array<{ version: string; note: string | null }> | null
+}
+
+function releaseNotes(info: ReleaseInfo): string {
+  const notes = info.releaseNotes
+  return (
+    (typeof notes === 'string'
+      ? notes
+      : notes?.find((entry) => entry.version === info.version)?.note) ?? ''
+  ).trim()
+}
+
 // Keep the lifecycle independent of Electron so failures and concurrent commands can be tested.
 export interface UpdateEngine {
   autoDownload: boolean
@@ -27,6 +41,7 @@ export class UpdateService {
       status: options.enabled ? 'idle' : 'disabled',
       currentVersion: options.version,
       version: null,
+      releaseNotes: '',
       progress: 0,
       canInstall: options.enabled && options.canInstall,
       reason: options.reason,
@@ -36,11 +51,23 @@ export class UpdateService {
     engine.autoInstallOnAppQuit = false
     engine.allowPrerelease = false
     engine.allowDowngrade = false
-    engine.on('update-available', (info: { version: string }) => {
-      this.state = { ...this.state, status: 'available', version: info.version, error: '' }
+    engine.on('update-available', (info: ReleaseInfo) => {
+      this.state = {
+        ...this.state,
+        status: 'available',
+        version: info.version,
+        releaseNotes: releaseNotes(info),
+        error: ''
+      }
     })
     engine.on('update-not-available', () => {
-      this.state = { ...this.state, status: 'up-to-date', version: null, error: '' }
+      this.state = {
+        ...this.state,
+        status: 'up-to-date',
+        version: null,
+        releaseNotes: '',
+        error: ''
+      }
     })
     engine.on('download-progress', (info: { percent: number }) => {
       if (this.state.status !== 'downloading') return
@@ -48,8 +75,16 @@ export class UpdateService {
         ? Math.max(0, Math.min(100, info.percent))
         : 0
     })
-    engine.on('update-downloaded', (info: { version: string }) => {
-      this.state = { ...this.state, status: 'downloaded', version: info.version, progress: 100 }
+    engine.on('update-downloaded', (info: ReleaseInfo) => {
+      this.state = {
+        ...this.state,
+        status: 'downloaded',
+        version: info.version,
+        releaseNotes:
+          releaseNotes(info) ||
+          (info.version === this.state.version ? this.state.releaseNotes : ''),
+        progress: 100
+      }
     })
     engine.on('error', () => this.fail())
   }
@@ -86,7 +121,14 @@ export class UpdateService {
     if (this.pending) return this.pending
     if (['disabled', 'downloaded', 'installing'].includes(this.state.status))
       return Promise.resolve()
-    this.state = { ...this.state, status: 'checking', error: '', progress: 0, version: null }
+    this.state = {
+      ...this.state,
+      status: 'checking',
+      error: '',
+      progress: 0,
+      version: null,
+      releaseNotes: ''
+    }
     this.pending = Promise.resolve().then(async () => {
       try {
         await this.engine.checkForUpdates()

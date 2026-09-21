@@ -1,6 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpCircle, X } from 'lucide-react'
 import type { UpdateState } from '../../shared/updates'
+
+// GitHub feeds supply HTML; render only its text, never remote markup or resources.
+function releaseNotesText(notes: string): string {
+  if (
+    !/<\/?(?:p|div|h[1-6]|ul|ol|li|br|pre|blockquote|a|strong|em|code|table)\b[^>]*>/i.test(notes)
+  )
+    return notes.trim()
+  const document = new DOMParser().parseFromString(notes, 'text/html')
+  document
+    .querySelectorAll('script, style, iframe, object, template')
+    .forEach((node) => node.remove())
+  document.querySelectorAll('br').forEach((node) => node.replaceWith('\n'))
+  document.querySelectorAll('li').forEach((node) => node.prepend('• '))
+  document
+    .querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, ul, ol, pre, blockquote, tr')
+    .forEach((node) => node.append('\n'))
+  return (document.body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
+}
 
 export function UpdateControl({ version }: { version?: string }) {
   const [state, setState] = useState<UpdateState>()
@@ -8,6 +26,7 @@ export function UpdateControl({ version }: { version?: string }) {
   const [error, setError] = useState('')
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
+  const notes = useMemo(() => releaseNotesText(state?.releaseNotes ?? ''), [state?.releaseNotes])
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout>
@@ -113,6 +132,14 @@ export function UpdateControl({ version }: { version?: string }) {
             <p role="status">{state ? messages[state.status] : '正在连接更新服务…'}</p>
             {state?.status === 'downloading' && (
               <progress aria-label="更新下载进度" max={100} value={state.progress} />
+            )}
+            {state?.version && (
+              <section className="update-release-notes" aria-label="更新内容">
+                <h3>v{state.version} 更新内容</h3>
+                <div className="update-release-notes-body" tabIndex={0}>
+                  {notes || '此版本暂未提供更新说明，可前往发布页查看详情。'}
+                </div>
+              </section>
             )}
             <p className="update-hint">
               {state?.canInstall

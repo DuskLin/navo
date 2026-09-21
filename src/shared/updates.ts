@@ -11,6 +11,7 @@ export interface UpdateState {
     | 'error'
   currentVersion: string
   version: string | null
+  releaseNotes: string
   progress: number
   canInstall: boolean
   reason: string

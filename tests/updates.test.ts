@@ -13,9 +13,13 @@ class Engine extends EventEmitter {
   installs = 0
   hasUpdate = true
   failDownload = false
+  releaseNotes: string | Array<{ version: string; note: string | null }> | null = '新增更新说明'
   async checkForUpdates() {
     this.checks++
-    this.emit(this.hasUpdate ? 'update-available' : 'update-not-available', { version: '0.2.0' })
+    this.emit(this.hasUpdate ? 'update-available' : 'update-not-available', {
+      version: '0.2.0',
+      releaseNotes: this.releaseNotes
+    })
   }
   async downloadUpdate() {
     this.downloads++
@@ -48,6 +52,7 @@ test('updates download once, keep ready state and install only after preparation
   assert.equal(engine.downloads, 1)
   assert.equal(engine.installs, 0)
   assert.equal(service.get().status, 'downloaded')
+  assert.equal(service.get().releaseNotes, '新增更新说明')
   await service.install()
   assert.equal(prepared, true)
   assert.equal(engine.installs, 1)
@@ -62,11 +67,34 @@ test('download failure is visible and retry succeeds; cancelled install remains 
   })
   await service.check()
   assert.equal(service.get().status, 'error')
+  assert.equal(service.get().releaseNotes, '新增更新说明')
   engine.failDownload = false
   await service.check()
   await assert.rejects(service.install(), /cancelled/)
   assert.equal(service.get().status, 'downloaded')
   assert.equal(engine.installs, 0)
+})
+
+test('release notes select the new version and clear on a fresh check or missing notes', async () => {
+  const engine = new Engine()
+  const service = new UpdateService(engine, { ...options, canInstall: false }, async () => {})
+  engine.releaseNotes = [
+    { version: '0.1.0', note: '旧版说明' },
+    { version: '0.2.0', note: '<h2>新增功能</h2><ul><li>展示更新内容</li></ul>' }
+  ]
+  await service.check()
+  assert.equal(service.get().releaseNotes, engine.releaseNotes[1].note)
+  engine.hasUpdate = false
+  const check = service.check()
+  assert.equal(service.get().releaseNotes, '')
+  await check
+  assert.equal(service.get().version, null)
+  assert.equal(service.get().releaseNotes, '')
+  engine.hasUpdate = true
+  engine.releaseNotes = null
+  await service.check()
+  assert.equal(service.get().status, 'available')
+  assert.equal(service.get().releaseNotes, '')
 })
 
 test('development does not check; unsupported installs still report updates', async () => {

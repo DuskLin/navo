@@ -298,6 +298,7 @@ try {
   await page.getByRole('button', { name: '应用更新', exact: true }).click()
   const updateDialog = page.getByRole('dialog', { name: '应用更新' })
   await updateDialog.getByText('开发模式', { exact: true }).waitFor()
+  assert.equal(await updateDialog.getByRole('region', { name: '更新内容' }).count(), 0)
   assert.equal(
     await updateDialog.getByRole('button', { name: '检查更新', exact: true }).isDisabled(),
     true
@@ -310,6 +311,8 @@ try {
       canInstall: true,
       reason: '',
       version: '0.2.0',
+      releaseNotes:
+        '<h2>新增功能</h2><ul><li>弹窗展示更新内容</li></ul><p>修复 &amp; 改进</p><script>window.__releaseScriptExecuted = true</script>',
       status: 'downloaded',
       progress: 100
     }))
@@ -317,6 +320,11 @@ try {
   await page.getByLabel('新版本更新提示').waitFor()
   await page.getByRole('button', { name: '查看更新' }).click()
   await updateDialog.getByRole('button', { name: '重启并安装' }).waitFor()
+  const releaseNotes = updateDialog.getByRole('region', { name: '更新内容' })
+  assert.match(await releaseNotes.innerText(), /新增功能\n.*弹窗展示更新内容/)
+  assert.match(await releaseNotes.innerText(), /修复 & 改进/)
+  assert.equal(await releaseNotes.locator('script, img, iframe').count(), 0)
+  assert.equal(await page.evaluate(() => window.__releaseScriptExecuted), undefined)
   await page.screenshot({ path: join(artifacts, 'update-ready.png') })
   await updateDialog.getByRole('button', { name: '关闭对话框' }).click()
   await page.getByRole('button', { name: '收起更新提示' }).click()
