@@ -4,6 +4,7 @@ import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import codexLogo from './assets/models/openai.svg'
 import { Modal } from './Modal'
 import { ModelListModal } from './ModelListModal'
+import { ModelLogo } from './ModelLogo'
 import {
   cloneElement,
   isValidElement,
@@ -428,6 +429,43 @@ function BalanceDetails({
 }
 const formatLatency = (ms: number | null | undefined): string =>
   ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
+function RequestLatency({ record }: { record: RequestRecord }) {
+  const metrics = [
+    { label: '首字', ms: record.firstTokenMs, warning: 3000, slow: 10000 },
+    { label: '耗时', ms: record.durationMs, warning: 15000, slow: 60000 }
+  ]
+  return (
+    <div className="request-latency">
+      {metrics.map(({ label, ms, warning, slow }) => {
+        const tone =
+          ms == null ? 'unknown' : ms >= slow ? 'slow' : ms >= warning ? 'warning' : 'fast'
+        const value =
+          ms == null
+            ? '—'
+            : ms >= 60000
+              ? `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
+              : formatLatency(ms)
+        return (
+          <div className={`request-latency-row latency-${tone}`} key={label}>
+            <span
+              className="latency-label"
+              title={
+                label === '首字'
+                  ? '从网关收到请求到首个文本、思考或工具调用输出，包含重试等待；非流式或未收到输出时为 —'
+                  : '从网关收到请求到请求结束的总耗时'
+              }
+            >
+              {label}
+            </span>
+            <span className="latency-value" title={ms == null ? '暂无数据' : `${ms}ms`}>
+              {value}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 const errorText = (error: unknown) =>
   error instanceof Error
     ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -1630,10 +1668,7 @@ export function GatewayPanel({
                                 思考强度
                               </th>
                               <th>状态</th>
-                              <th title="从网关收到请求到首个文本、思考或工具调用输出，包含重试等待；非流式或未收到输出时为 —">
-                                首字耗时
-                              </th>
-                              <th>总耗时</th>
+                              <th>耗时</th>
                               <th>费用</th>
                             </tr>
                           </thead>
@@ -1648,7 +1683,10 @@ export function GatewayPanel({
                                   )}
                                 </td>
                                 <td className="model-cell">
-                                  {r.model || '模型列表'}
+                                  <span className="request-model-badge">
+                                    <ModelLogo model={r.model || ''} />
+                                    <span>{r.model || '模型列表'}</span>
+                                  </span>
                                   {r.upstreamModel && r.upstreamModel !== r.model && (
                                     <div className="muted">→ {r.upstreamModel}</div>
                                   )}
@@ -1681,14 +1719,7 @@ export function GatewayPanel({
                                   </span>
                                 </td>
                                 <td>
-                                  <span className="latency-value">
-                                    {formatLatency(r.firstTokenMs)}
-                                  </span>
-                                </td>
-                                <td>
-                                  <span className="latency-value">
-                                    {formatLatency(r.durationMs)}
-                                  </span>
+                                  <RequestLatency record={r} />
                                 </td>
                                 <td>
                                   <RequestCostCell record={r} snapshot={snapshot} />

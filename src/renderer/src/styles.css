@@ -432,16 +432,45 @@ tbody tr:last-child td {
   border-bottom: 0;
 }
 .request-latency {
+  --latency-fast: #23834b;
+  --latency-warning: #a67509;
+  --latency-slow: #c74444;
   display: grid;
-  grid-template-columns: auto auto;
   width: max-content;
-  column-gap: 9px;
-  border-left: 3px solid var(--accent);
-  border-radius: 2px;
-  padding-left: 9px;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 21px;
   white-space: nowrap;
+}
+.request-latency-row {
+  --latency-color: var(--latency-fast);
+  display: grid;
+  grid-template-columns: auto minmax(56px, auto);
+  column-gap: 8px;
+  border-left: 3px solid var(--latency-color);
+  padding-left: 10px;
+}
+.request-latency-row:first-child {
+  border-top-left-radius: 3px;
+}
+.request-latency-row:last-child {
+  border-bottom-left-radius: 3px;
+}
+.request-latency-row.latency-warning {
+  --latency-color: var(--latency-warning);
+}
+.request-latency-row.latency-slow {
+  --latency-color: var(--latency-slow);
+}
+:root[data-theme='dark'] .request-latency {
+  --latency-fast: #64c88a;
+  --latency-warning: #e4b94f;
+  --latency-slow: #ed7373;
+}
+.request-latency-row.latency-unknown {
+  --latency-color: var(--muted);
+}
+.request-latency-row .latency-value {
+  color: var(--latency-color);
 }
 .latency-label {
   color: var(--muted);
@@ -920,7 +949,31 @@ td small {
   font-size: 12px;
 }
 .request-history-table {
-  min-width: 1100px;
+  min-width: 1040px;
+}
+.request-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--control-background);
+  color: var(--text);
+  font-weight: 600;
+  line-height: 20px;
+  vertical-align: middle;
+}
+.request-model-badge > .model-logo,
+.request-model-badge > svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+.request-model-badge + .muted {
+  margin-top: 5px;
+  font-size: 11px;
 }
 .request-history-table .model-cell {
   min-width: 140px;
