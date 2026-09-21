@@ -252,6 +252,15 @@ async function launch() {
   delete env.ELECTRON_RUN_AS_NODE
   application = await electron.launch({ args: [testEntry], env })
   const page = await application.firstWindow()
+  // The DOM can be ready before the initially hidden native window is shown.
+  await application.evaluate(
+    ({ BrowserWindow }) =>
+      new Promise((resolve) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        if (window.isVisible()) resolve()
+        else window.once('show', resolve)
+      })
+  )
   page.on('pageerror', (error) => errors.push(error.message))
   await page
     .locator('.app-status')
@@ -1070,17 +1079,18 @@ try {
   }
   await page.getByRole('tab', { name: '请求记录' }).click()
   await page.getByRole('columnheader', { name: '费用', exact: true }).waitFor()
-  await page
+  const costButton = page
     .getByRole('row')
-    .filter({ hasText: 'requestId:' })
+    .filter({ hasText: 'kimi-for-coding' })
     .first()
     .getByRole('button', { name: '查看请求费用明细', exact: true })
-    .hover()
+  await costButton.scrollIntoViewIfNeeded()
+  await costButton.focus()
   const costTooltip = page.getByRole('tooltip').filter({ hasText: '请求费用明细' })
   await costTooltip.getByText('缓存读取', { exact: true }).waitFor()
   await costTooltip.getByText('800', { exact: true }).waitFor()
   await page.screenshot({ path: join(artifacts, 'request-cost-tooltip.png') })
-  await page.getByRole('columnheader', { name: '时间', exact: true }).hover()
+  await costButton.press('Escape')
   await costTooltip.waitFor({ state: 'hidden' })
   await page.getByText('模型列表', { exact: true }).waitFor()
   // 重启后旧请求仍可查看；新增请求通过 10 条游标分页访问。
@@ -1096,10 +1106,12 @@ try {
   }
   await page.getByText('共 17 条', { exact: true }).waitFor()
   assert.equal(await page.getByRole('row').count(), 11)
-  await page
-    .getByText('requestId: 6adf4190-2959-4444-878c-454c7a6673ad', { exact: true })
-    .first()
-    .waitFor()
+  // Request IDs remain in history even though the table no longer renders them.
+  await page.waitForFunction(async () =>
+    (await window.navo.getRequestHistory()).records.some(
+      (record) => record.upstreamRequestId === '6adf4190-2959-4444-878c-454c7a6673ad'
+    )
+  )
   await page.getByRole('button', { name: '下一页', exact: true }).click()
   await page.getByText('第 2 页', { exact: true }).waitFor()
   await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 7)

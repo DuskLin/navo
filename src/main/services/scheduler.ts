@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AccountRuntime } from '../../shared/contracts'
+import { accountSupportsModel } from '../../shared/model-mapping'
 import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
 import type { StoredAccount, StoredGroup } from './gateway-store'
 
@@ -67,7 +68,7 @@ export class Scheduler {
         state.authFailed ||
         state.cooldownUntil > now ||
         state.active >= account.maxConcurrency ||
-        (model && !account.models.includes(model))
+        (model && !accountSupportsModel(account, model))
       )
         return []
       const fiveHour = remainingRatio(

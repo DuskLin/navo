@@ -437,6 +437,168 @@ const accountInput = (name: string, groupId = 'default'): AccountInput => ({
   memberships: [{ groupId, priority: 0, weight: 1 }],
   secret: `secret-${name}`
 })
+
+test('account model mappings persist, survive refresh and partial updates, and can be cleared', async () => {
+  const f = await storeFixture()
+  const gateway = f.createGateway(undefined, async () => Response.json({ data: [{ id: 'model' }] }))
+  try {
+    await gateway.saveAccount({
+      ...accountInput('mapped'),
+      modelMappings: { alias: 'model', 'claude-*': 'model' }
+    })
+    const original = f.store.get().accounts[0]
+    await gateway.refreshAccount(original.id)
+    await f.store.saveAccount({ ...accountInput('renamed'), id: original.id, secret: undefined })
+    const restored = new GatewayStore(f.file, f.secrets)
+    await restored.load()
+    assert.deepEqual(restored.get().accounts[0].modelMappings, original.modelMappings)
+    assert.deepEqual(gateway.snapshot().accounts[0].modelMappings, original.modelMappings)
+    await assert.rejects(
+      gateway.saveAccount({ ...original, modelMappings: { 'a*b': 'model' } }),
+      /通配符/
+    )
+    await f.store.saveAccount({ ...original, modelMappings: {} })
+    await restored.load()
+    assert.deepEqual(restored.get().accounts[0].modelMappings, {})
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('mapping happens before protocol selection for JSON, SSE and token counting; catalogs expose aliases', async () => {
+  const f = await storeFixture()
+  const calls: { url: string; body: Record<string, any> }[] = []
+  const gateway = f.createGateway(
+    async (url, init) => {
+      const body = JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
+      calls.push({ url: String(url), body })
+      if (String(url).endsWith('/count_tokens')) return Response.json({ input_tokens: 7 })
+      if (body.stream)
+        return new Response(
+          'data: {"id":"chat-test","model":"upstream","choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\n\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          { headers: { 'content-type': 'text/event-stream' } }
+        )
+      return Response.json({
+        id: 'chat-test',
+        model: 'upstream',
+        choices: [{ message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 7, completion_tokens: 1 }
+      })
+    },
+    undefined,
+    async () => Response.json({})
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await f.store.saveAccount(
+      {
+        ...accountInput('mapped'),
+        modelMappings: { alias: 'upstream', 'claude-*': 'upstream', missing: 'removed' },
+        modelProtocols: { upstream: ['chat-completions'] }
+      },
+      { models: ['upstream'], maxConcurrency: 20, checkedAt: Date.now(), warning: '' }
+    )
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    for (const route of ['/v1/chat/completions', '/v1/messages', '/v1/responses']) {
+      for (const stream of [false, true]) {
+        const response = await fetch(reserved.url + route, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: stream ? 'claude-test' : 'alias',
+            stream,
+            max_tokens: 20,
+            ...(route === '/v1/responses'
+              ? { input: 'hi' }
+              : { messages: [{ role: 'user', content: 'hi' }] })
+          })
+        })
+        assert.equal(response.status, 200)
+        assert.match(await response.text(), /hello/)
+        assert.equal(calls.at(-1)!.body.model, 'upstream')
+        assert.equal(calls.at(-1)!.url, 'https://api.kimi.com/coding/v1/chat/completions')
+      }
+    }
+    await eventually(() => gateway.snapshot().requests.length === 6)
+    const records = gateway.snapshot().requests
+    assert.ok(records.every((r) => r.upstreamModel === 'upstream'))
+    assert.deepEqual(new Set(records.map((r) => r.model)), new Set(['alias', 'claude-test']))
+    assert.ok(gateway.history.page().records.every((r) => r.upstreamModel === 'upstream'))
+    const count = await fetch(reserved.url + '/v1/messages/count_tokens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'alias', messages: [] })
+    })
+    assert.deepEqual(await count.json(), { input_tokens: 7 })
+    assert.equal(calls.at(-1)!.body.model, 'upstream')
+    const list = await (await fetch(reserved.url + '/v1/models')).json()
+    assert.deepEqual(
+      list.data.map((m: { id: string }) => m.id),
+      ['upstream', 'alias']
+    )
+    const registry = await (await fetch(reserved.url + '/api.json')).json()
+    assert.deepEqual(Object.keys(registry.navo.models), ['upstream', 'alias'])
+    const saved = f.store.get().accounts[0]
+    await f.store.saveAccount({ ...saved, excludedModels: ['upstream'] })
+    const blocked = await fetch(reserved.url + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'alias' })
+    })
+    assert.equal(blocked.status, 503)
+    await blocked.text()
+    assert.equal(calls.length, 7)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('failover resolves the original requested ID separately for each account', async () => {
+  const f = await storeFixture()
+  const calls: string[] = []
+  const gateway = f.createGateway(async (_url, init) => {
+    const body = JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
+    calls.push(body.model)
+    return calls.length === 1
+      ? new Response('{}', { status: 503 })
+      : Response.json({
+          model: body.model,
+          choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }]
+        })
+  })
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    for (const name of ['first', 'second'])
+      await f.store.saveAccount(
+        {
+          ...accountInput(name),
+          modelMappings: { alias: name }
+        },
+        { models: [name], maxConcurrency: 20, checkedAt: Date.now(), warning: '' }
+      )
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const response = await fetch(reserved.url + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'alias', messages: [{ role: 'user', content: 'hi' }] })
+    })
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).model, 'second')
+    assert.deepEqual(calls, ['first', 'second'])
+    await eventually(() => gateway.snapshot().requests.length === 1)
+    const record = gateway.snapshot().requests[0]
+    assert.equal(record.model, 'alias')
+    assert.equal(record.upstreamModel, 'second')
+    assert.equal(record.attempts, 2)
+  } finally {
+    await f.cleanup()
+  }
+})
 const group: StoredGroup = {
   id: 'default',
   name: '默认分组',

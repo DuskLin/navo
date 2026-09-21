@@ -107,6 +107,8 @@ export interface AccountInput {
   enabled: boolean
   concurrencyOverride?: number | null
   modelProtocols?: Record<string, ModelProtocol[]>
+  /** 请求模型 ID（支持末尾 *）到此账号上游模型 ID 的映射。 */
+  modelMappings?: Record<string, string>
   excludedModels?: string[]
   manualModels?: string[]
   memberships: Membership[]
@@ -265,6 +267,8 @@ export interface RequestRecord {
   inboundRoute?: string
   /** 最后一次调度实际发出的接口；null 表示未转发，undefined 表示旧记录。 */
   upstreamRoute?: string | null
+  /** 最后一次转发使用的模型 ID；旧记录缺省时使用 model。 */
+  upstreamModel?: string
   usage?: import('./usage').TokenUsage | null
   upstreamRequestId?: string | null
   reasoningEffort?: string | null

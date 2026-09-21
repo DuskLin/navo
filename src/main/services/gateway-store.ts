@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { storedQuota } from '../../shared/kimi-quota'
 import { storedBalance } from '../../shared/deepseek-balance'
+import { validateModelMappings } from '../../shared/model-mapping'
 import {
   DEFAULT_ACCOUNT_CONCURRENCY,
   PROVIDERS,
@@ -156,6 +157,9 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
       ? { excludedModels: validateExcludedModels(v.excludedModels) }
       : {}),
     ...(v.manualModels !== undefined ? { manualModels: validateManualModels(v.manualModels) } : {}),
+    ...(v.modelMappings !== undefined
+      ? { modelMappings: validateModelMappings(v.modelMappings) }
+      : {}),
     region: v.region as AccountInput['region'],
     enabled: boolean(v.enabled),
     ...(v.concurrencyOverride !== undefined
@@ -488,6 +492,8 @@ export class GatewayStore {
         input.excludedModels ?? (old?.provider === input.provider ? old?.excludedModels : undefined)
       const manualModels =
         input.manualModels ?? (old?.provider === input.provider ? old?.manualModels : undefined)
+      const modelMappings =
+        input.modelMappings ?? (old?.provider === input.provider ? old?.modelMappings : undefined)
       const account: StoredAccount = {
         ...input,
         ...(input.provider === 'kimi' && input.kind === 'oauth'
@@ -496,6 +502,7 @@ export class GatewayStore {
         ...(modelProtocols !== undefined ? { modelProtocols } : {}),
         ...(excludedModels !== undefined ? { excludedModels } : {}),
         ...(manualModels !== undefined ? { manualModels } : {}),
+        ...(modelMappings !== undefined ? { modelMappings } : {}),
         id,
         credential: nextCredential,
         ...capabilityFields(

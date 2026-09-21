@@ -80,6 +80,18 @@ try {
       await result.click()
       await dialog.locator('.model-test-result p').getByText('OK', { exact: true }).waitFor()
     }
+    await dialog.getByRole('button', { name: '添加映射', exact: true }).click()
+    await dialog.getByLabel('请求模型 ID 1', { exact: true }).fill('client-alias')
+    await dialog.getByLabel('上游模型 ID 1', { exact: true }).fill('manual-one')
+    await dialog.getByRole('button', { name: '添加映射', exact: true }).click()
+    await dialog.getByLabel('请求模型 ID 2', { exact: true }).fill('client-alias')
+    await dialog.getByLabel('上游模型 ID 2', { exact: true }).fill('manual-two')
+    await dialog.getByRole('button', { name: '保存账号', exact: true }).click()
+    await dialog.getByRole('alert').getByText('请求模型 ID 不能重复', { exact: true }).waitFor()
+    await dialog.getByLabel('请求模型 ID 2', { exact: true }).fill('claude-*')
+    await dialog.getByRole('button', { name: '添加映射', exact: true }).click()
+    await dialog.getByRole('button', { name: '删除映射 3', exact: true }).click()
+    await dialog.getByRole('region', { name: '模型 ID 映射', exact: true }).scrollIntoViewIfNeeded()
     await mkdir(resolve('artifacts'), { recursive: true })
     await page.screenshot({ path: resolve(`artifacts/custom-ai-${mode}.png`) })
     await dialog.getByRole('button', { name: '保存账号', exact: true }).click()
@@ -91,13 +103,20 @@ try {
   assert.deepEqual(snapshot.accounts[0].models, ['auto-model', 'manual-one', 'manual-two'])
   assert.deepEqual(snapshot.accounts[1].models, ['manual-one', 'manual-two'])
   assert.equal(snapshot.accounts[1].baseUrl, `${baseUrl}/manual`)
+  for (const account of snapshot.accounts)
+    assert.deepEqual(account.modelMappings, {
+      'client-alias': 'manual-one',
+      'claude-*': 'manual-two'
+    })
   assert.ok(calls.length > 0)
   assert.ok(
     calls.every((url) => ['/custom/v1/models', '/custom/v1/chat/completions'].includes(url))
   )
   assert.equal(calls.filter((url) => url === '/custom/v1/chat/completions').length, 1)
   assert.deepEqual(errors, [])
-  console.log('通过：自定义 URL / Key、自动获取、手动批量模型、默认协议、保存及重新加载。')
+  console.log(
+    '通过：自定义 URL / Key、自动获取、手动批量模型、默认协议、模型映射增删及重复校验、保存及重新加载。'
+  )
 } finally {
   if (app) await app.close()
   await new Promise((resolve) => {

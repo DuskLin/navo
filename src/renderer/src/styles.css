@@ -2753,6 +2753,30 @@ input.account-policy-switch[role='switch']:checked::after,
 .manual-model-entry {
   margin: 16px 0;
 }
+.model-mappings {
+  margin: 20px 0;
+}
+.model-mapping-list {
+  display: grid;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+.model-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.model-mapping-row input {
+  min-width: 0;
+  width: 100%;
+}
+.model-mapping-labels {
+  color: var(--muted);
+  font-size: 11px;
+  grid-template-columns: minmax(0, 1fr) 12px minmax(0, 1fr) 28px;
+}
 .manual-model-entry > label {
   display: block;
   margin-bottom: 8px;

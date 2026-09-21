@@ -4,6 +4,7 @@ import { KimiAuth, kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
+import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
 import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -625,6 +626,7 @@ export class Gateway {
     let protocol: UsageProtocol | undefined
     let inboundRoute: string | undefined
     let upstreamRoute: string | null = null
+    let upstreamModel: string | undefined
     let sessionId: string | undefined
     let accountId: string | undefined
     let provider: RequestRecord['provider']
@@ -704,7 +706,7 @@ export class Gateway {
         const accounts = data.accounts.filter(
           (account) => account.enabled && account.credential.accessToken && account.capabilities
         )
-        const models = [...new Set(accounts.flatMap((account) => account.models))]
+        const models = [...new Set(accounts.flatMap(exposedModels))]
         finalStatus = 200
         res.writeHead(200, {
           'content-type': 'application/json',
@@ -800,7 +802,7 @@ export class Gateway {
           account.enabled &&
           !!account.credential.accessToken &&
           !!account.capabilities &&
-          (!model || account.models.includes(model))
+          (!model || accountSupportsModel(account, model))
         if (available.some(supportsModel) && !pool.some(supportsModel))
           throw new HttpError(
             403,
@@ -815,6 +817,7 @@ export class Gateway {
         provider = account.provider ?? 'kimi'
         attempts++
         upstreamRoute = null
+        upstreamModel = undefined
         if (flowId) this.liveFlows.update(flowId, { state: 'waiting' })
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
@@ -839,17 +842,19 @@ export class Gateway {
             res.end(JSON.stringify({ input_tokens: estimateInputTokens(payload) }))
             return
           }
-          const targetRoute = modelUpstreamRoute(account, model, route)
+          const targetModel = mappedModel(account, model)
+          const targetPayload = targetModel === model ? payload : { ...payload, model: targetModel }
+          const targetRoute = modelUpstreamRoute(account, targetModel, route)
           const converted =
             targetRoute !== route || (account.provider === 'codex' && payload.stream !== true)
-              ? convertRequest(payload, routeProtocol(route), routeProtocol(targetRoute))
+              ? convertRequest(targetPayload, routeProtocol(route), routeProtocol(targetRoute))
               : undefined
-          const wireBody = converted?.body ?? payload
-          const normalizedBody = normalizeMiniMaxRequest(wireBody, model, targetRoute)
+          const wireBody = converted?.body ?? targetPayload
+          const normalizedBody = normalizeMiniMaxRequest(wireBody, targetModel, targetRoute)
           const requestBody =
             account.provider === 'codex'
               ? Buffer.from(JSON.stringify(codexRequest(wireBody)))
-              : converted || normalizedBody !== wireBody
+              : converted || normalizedBody !== wireBody || targetPayload !== payload
                 ? Buffer.from(JSON.stringify(normalizedBody))
                 : body
           const headers = new Headers({
@@ -884,6 +889,7 @@ export class Gateway {
               headers.set(name, value)
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           upstreamRoute = targetRoute
+          upstreamModel = targetModel
           const upstream = await this.request(
             `${upstreamUrl(account.region, account.provider, targetRoute, account.baseUrl)}${url.search}`,
             {
@@ -1146,6 +1152,7 @@ export class Gateway {
           protocol,
           inboundRoute,
           upstreamRoute,
+          upstreamModel,
           usage,
           interruption,
           streamDurationMs,

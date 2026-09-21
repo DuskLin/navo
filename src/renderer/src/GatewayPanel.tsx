@@ -67,6 +67,8 @@ import { requestCost, requestCostDetails } from '../../shared/request-cost'
 import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
 import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
+import { validateModelMappings } from '../../shared/model-mapping'
+import { ModelMappingEditor } from './ModelMappingEditor'
 
 import { KimiLogo } from './KimiLogo'
 import minimaxLogo from './assets/models/minimax.svg'
@@ -1634,7 +1636,12 @@ export function GatewayPanel({
                                     <span className="badge">模型测试</span>
                                   )}
                                 </td>
-                                <td className="model-cell">{r.model || '模型列表'}</td>
+                                <td className="model-cell">
+                                  {r.model || '模型列表'}
+                                  {r.upstreamModel && r.upstreamModel !== r.model && (
+                                    <div className="muted">→ {r.upstreamModel}</div>
+                                  )}
+                                </td>
                                 <td className="protocol-conversion-cell">
                                   <div>
                                     <span className="muted">入站：</span>
@@ -2053,6 +2060,9 @@ function AccountEditor({
 }) {
   const [draft, setDraft] = useState(input)
   const [confirmNonKimi, setConfirmNonKimi] = useState(false)
+  const [modelMappings, setModelMappings] = useState<[string, string][]>(
+    Object.entries(input.modelMappings ?? {})
+  )
   const [manualModel, setManualModel] = useState('')
   const [manualModelError, setManualModelError] = useState('')
   const [error, setError] = useState('')
@@ -2065,6 +2075,7 @@ function AccountEditor({
   const probeVersion = useRef(0)
   const lock = useRef(false)
   const change = <K extends keyof AccountInput>(key: K, value: AccountInput[K]) => {
+    if (key === 'provider') setModelMappings([])
     if (
       key === 'secret' ||
       key === 'region' ||
@@ -2085,6 +2096,7 @@ function AccountEditor({
             baseUrl: '',
             modelSource: 'automatic' as const,
             modelProtocols: {},
+            modelMappings: {},
             excludedModels: [],
             manualModels: []
           }
@@ -2160,7 +2172,14 @@ function AccountEditor({
     setBusy(true)
     setError('')
     try {
-      saved(await api.saveAccount(draft))
+      if (new Set(modelMappings.map(([from]) => from.trim())).size !== modelMappings.length)
+        throw new Error('请求模型 ID 不能重复')
+      saved(
+        await api.saveAccount({
+          ...draft,
+          modelMappings: validateModelMappings(Object.fromEntries(modelMappings))
+        })
+      )
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -2559,6 +2578,14 @@ function AccountEditor({
                 </p>
               )}
             </section>
+            <ModelMappingEditor
+              rows={modelMappings}
+              models={visibleModels}
+              onChange={(rows) => {
+                setModelMappings(rows)
+                setError('')
+              }}
+            />
             {draft.provider === 'deepseek' ? (
               <BalanceDetails capabilities={capabilities} loading={reading} />
             ) : (
@@ -3325,7 +3352,7 @@ function RequestCostCell({
             onMouseLeave={hide}
           >
             <strong>请求费用明细</strong>
-            <p className="muted">{record.model} · 单价按每百万 token 计</p>
+            <p className="muted">{record.upstreamModel ?? record.model} · 单价按每百万 token 计</p>
             <table>
               <thead>
                 <tr>

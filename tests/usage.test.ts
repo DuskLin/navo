@@ -311,6 +311,84 @@ test('平均速度按有效流式时长加权，中断数量和已报告消耗�
   }
 })
 
+test('模型表现按实际上游合并别名、直接调用和旧记录，并按原始样本计算均值', async (t) => {
+  const start = Date.parse('2026-09-21T02:00:00Z')
+  t.mock.method(Date, 'now', () => start + 86400000)
+  const dir = await mkdtemp(join(tmpdir(), 'navo-mapped-performance-'))
+  const file = join(dir, 'history.sqlite')
+  const history = new RequestHistory(file)
+  const base = {
+    time: start,
+    group: '',
+    account: 'A',
+    accountId: 'a',
+    model: 'deepseek-flash',
+    upstreamModel: 'deepseek/deepseek-v4.1-flash',
+    status: 200,
+    attempts: 1,
+    durationMs: 4000,
+    firstTokenMs: 100,
+    streamDurationMs: 1000,
+    usage: { input: 1, output: 20, cacheRead: null, cacheWrite: null, cost: null }
+  }
+  try {
+    history.append({ ...base, id: 'alias' })
+    history.append({ ...base, id: 'second-alias', model: 'fast', firstTokenMs: 300 })
+    history.append({
+      ...base,
+      id: 'direct',
+      model: base.upstreamModel,
+      upstreamModel: undefined,
+      firstTokenMs: 800,
+      streamDurationMs: 3000,
+      usage: { ...base.usage, output: 80 }
+    })
+    history.append({ ...base, id: 'failed', status: 500, firstTokenMs: 9000 })
+    history.append({ ...base, id: 'different-target', upstreamModel: 'other' })
+    history.append({ ...base, id: 'different-account', accountId: 'b' })
+    history.append({ ...base, id: 'off-peak', time: start + 3 * 3600000 })
+    history.append({ ...base, id: 'next-day', time: start + 86400000 })
+    const reader = new RequestHistory(file, true)
+    try {
+      const query = { start, end: start + 2 * 86400000, bucketMs: 3600000 }
+      const daily = reader.usage({ ...query, performanceByDay: true }).byAccount
+      const merged = daily.find(
+        (row) =>
+          row.accountId === 'a' &&
+          row.model === base.upstreamModel &&
+          row.period === 'peak' &&
+          row.day === '2026-09-21'
+      )!
+      assert.equal(daily.length, 5)
+      assert.equal(merged.firstTokenSamples, 3)
+      assert.equal(merged.averageFirstTokenMs, 400)
+      assert.equal(merged.speedSamples, 3)
+      assert.equal(merged.averageTokensPerSecond, 24)
+      assert.ok(daily.every((row) => !['deepseek-flash', 'fast'].includes(row.model)))
+      const combined = reader
+        .usage(query)
+        .byAccount.find(
+          (row) =>
+            row.accountId === 'a' && row.model === base.upstreamModel && row.period === 'peak'
+        )!
+      assert.equal(combined.firstTokenSamples, 4)
+      assert.equal(combined.averageFirstTokenMs, 325)
+      assert.equal(combined.averageTokensPerSecond, 140 / 6)
+      // Grouping must not rewrite the original history or infer past targets from today's mapping.
+      assert.equal(
+        reader.page().records.find((record) => record.id === 'alias')?.model,
+        'deepseek-flash'
+      )
+      assert.equal(daily.find((row) => row.model === 'other')?.firstTokenSamples, 1)
+    } finally {
+      reader.close()
+    }
+  } finally {
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('按账号和模型平均首 token，保留零值并排除未知、失败和中断', async (t) => {
   t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-first-token-stats-'))

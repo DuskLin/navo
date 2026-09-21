@@ -432,9 +432,13 @@ export class RequestHistory {
     const hour =
       "CAST(strftime('%H', json_extract(record, '$.time') / 1000, 'unixepoch', '+8 hours') AS INTEGER)"
     const period = `CASE WHEN ${weekday} BETWEEN 1 AND 5 AND ((${hour} >= 9 AND ${hour} < 12) OR (${hour} >= 14 AND ${hour} < 18)) THEN 'peak' ELSE 'off-peak' END`
+    // Combine aliases and direct requests by the model actually sent upstream.
+    // Older records without an upstream ID retain their recorded model.
+    const performanceModel =
+      "COALESCE(NULLIF(json_extract(record, '$.upstreamModel'), ''), NULLIF(json_extract(record, '$.model'), ''), '未知模型')"
     const byAccount = this.db
       .prepare(
-        `SELECT ${performanceDay}json_extract(record, '$.accountId') AS accountId, COALESCE(NULLIF(json_extract(record, '$.model'), ''), '未知模型') AS model, ${period} AS period, AVG(CASE WHEN ${firstTokenEligible} THEN json_extract(record, '$.firstTokenMs') END) AS averageFirstTokenMs, COUNT(CASE WHEN ${firstTokenEligible} THEN 1 END) AS firstTokenSamples, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId, model, period${query.performanceByDay ? ', day' : ''} ORDER BY ${query.performanceByDay ? 'day DESC, ' : ''}accountId, model, period`
+        `SELECT ${performanceDay}json_extract(record, '$.accountId') AS accountId, ${performanceModel} AS model, ${period} AS period, AVG(CASE WHEN ${firstTokenEligible} THEN json_extract(record, '$.firstTokenMs') END) AS averageFirstTokenMs, COUNT(CASE WHEN ${firstTokenEligible} THEN 1 END) AS firstTokenSamples, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId, model, period${query.performanceByDay ? ', day' : ''} ORDER BY ${query.performanceByDay ? 'day DESC, ' : ''}accountId, model, period`
       )
       .all(...values)
       .map((row) => {

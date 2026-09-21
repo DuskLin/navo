@@ -43,6 +43,12 @@ test('request costs prefer reported USD, including explicit zero', () => {
     assert.deepEqual(result.amounts, [{ currency: 'USD', value: cost }])
   }
 })
+
+test('mapped requests use the recorded upstream model for historical cost and details', () => {
+  const mapped = { ...record, model: 'alias', upstreamModel: 'm' }
+  assert.deepEqual(requestCost(mapped, snapshot), requestCost(record, snapshot))
+  assert.deepEqual(requestCostDetails(mapped, snapshot), requestCostDetails(record, snapshot))
+})
 test('request estimates resolve each price field, keep currencies separate and preserve free cached tokens', () => {
   const result = requestCost(record, snapshot)
   assert.equal(result.source, 'estimated')

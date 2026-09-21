@@ -21,11 +21,12 @@ export function requestCost(record: RequestRecord, snapshot: RequestPricing): Re
   const account = snapshot.accounts.find((a) => a.id === record.accountId)
   const provider = record.provider ?? (account ? (account.provider ?? 'kimi') : undefined)
   if (!provider) return unknown('无法确定历史请求的供应商')
+  const model = record.upstreamModel ?? record.model
   const manual: ModelPrice = snapshot.modelPrices.find(
-    (p) => p.provider === provider && p.model === record.model
+    (p) => p.provider === provider && p.model === model
   ) ?? {
     provider,
-    model: record.model,
+    model,
     currency: 'USD',
     input: null,
     output: null,
@@ -55,14 +56,13 @@ export function requestCost(record: RequestRecord, snapshot: RequestPricing): Re
 export function requestCostDetails(record: RequestRecord, snapshot: RequestPricing) {
   const account = snapshot.accounts.find((a) => a.id === record.accountId)
   const provider = record.provider ?? (account ? (account.provider ?? 'kimi') : undefined)
-  const manual = snapshot.modelPrices.find(
-    (p) => p.provider === provider && p.model === record.model
-  )
+  const model = record.upstreamModel ?? record.model
+  const manual = snapshot.modelPrices.find((p) => p.provider === provider && p.model === model)
   const fallback = provider
     ? matchedModelPrice(
         manual ?? {
           provider,
-          model: record.model,
+          model,
           currency: 'USD',
           input: null,
           output: null,

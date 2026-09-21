@@ -1,8 +1,13 @@
 import type { CatalogPrice, ModelPrice, Provider } from '../../shared/contracts'
 import { mergeRegistryCapabilities } from './registry-capabilities'
 import { catalogProviders } from './model-price-catalog'
+import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
 
-type RegistryAccount = { provider?: Provider; models: string[] }
+type RegistryAccount = {
+  provider?: Provider
+  models: string[]
+  modelMappings?: Record<string, string>
+}
 
 function displayName(id: string): string {
   const words: Record<string, string> = {
@@ -29,19 +34,22 @@ export function registryModels(
   const catalog = new Map(
     entries.map((entry) => [JSON.stringify([entry.provider, entry.model]), entry])
   )
-  const models = [...new Set(accounts.flatMap((account) => account.models))]
+  const models = [...new Set(accounts.flatMap(exposedModels))]
   return Object.fromEntries(
     models.map((id) => {
       const candidates = accounts
-        .filter((account) => account.models.includes(id))
+        .filter((account) => accountSupportsModel(account, id))
         .map((account) => {
           const provider = account.provider ?? 'kimi'
+          const upstreamModel = mappedModel(account, id)
           const mapping = prices.find(
-            (price) => price.provider === provider && price.model === id
+            (price) => price.provider === provider && price.model === upstreamModel
           )?.catalogMatch
           const entry = catalog.get(
             JSON.stringify(
-              mapping ? [mapping.provider, mapping.model] : [catalogProviders[provider], id]
+              mapping
+                ? [mapping.provider, mapping.model]
+                : [catalogProviders[provider], upstreamModel]
             )
           )
           return entry

@@ -63,6 +63,10 @@ After signing in to Codex with ChatGPT, open **Settings → Experimental feature
 
 All providers support **Edit account → Available models → Add model manually**. Enter the exact model ID and save the account. Manual models survive upstream refreshes and restarts; actual availability still depends on upstream account access.
 
+**Edit account → Model ID mapping** maps client model IDs to this account's upstream IDs. Following [sub2api](https://github.com/Wei-Shaw/sub2api/blob/main/backend/internal/service/account.go), exact matches take precedence over the longest trailing-`*` prefix, such as `claude-* → kimi-for-coding`; `*` provides a fallback. Rules apply once. Unmatched IDs retain their original behavior. Targets must be enabled in the account's available models; add undiscovered targets manually first. Mappings survive refreshes and restarts and can be removed to restore direct routing.
+
+Each failover account resolves the original client ID independently. Protocol selection, registry metadata and cost estimates use the target model. `/v1/models` and `/api.json` advertise callable exact aliases, excluding wildcard patterns. Request history shows both IDs, while upstream responses retain their actual model name.
+
 ## Quick start
 
 ### Install or run from source
@@ -88,7 +92,7 @@ npm run dev
 
 ## Connect your client
 
-These examples use the default port. Replace `<GATEWAY_KEY>` with the gateway key copied from the app. The model ID must appear in an enabled account's model list. Enter provider API keys in the app.
+These examples use the default port. Replace `<GATEWAY_KEY>` with the gateway key copied from the app. The model ID must be available directly or through a mapping on an enabled account. Enter provider API keys in the app.
 
 ### Kimi Code CLI
 
