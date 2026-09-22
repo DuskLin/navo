@@ -536,14 +536,14 @@ docs/                   # 技术参考、协议审计与 README 配图
 <details>
 <summary>展开打包、发布与跨平台验证说明</summary>
 
-通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 或发布 GitHub Release 时触发，构建 macOS x64（Intel）与 arm64（Apple Silicon）的 DMG / ZIP、Windows x64 的 NSIS EXE 和 Linux x64 的 AppImage。也可在 Actions 页面手动运行工作流，填写已有 tag 来重新打包，无需移动标签。
+通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 时触发，构建 macOS x64（Intel）与 arm64（Apple Silicon）的 DMG / ZIP、Windows x64 的 NSIS EXE 和 Linux x64 的 AppImage。也可在 Actions 页面手动运行工作流，填写已有 tag 来重新打包，无需移动标签。
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题和手写说明，更新自动摘要及附件。全部平台构建和安装检查成功后才上传 Release 附件，Actions 产物保留 14 天。
+请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；重建草稿版本会保留标题和手写说明，更新自动摘要及附件。全部平台构建和安装检查成功后才上传 Release 附件，Actions 产物保留 14 天。附件上传完成后再正式发布；正式发布不会重复触发构建，已锁定的正式版附件不可覆盖，需要修改时请发布新版本。
 
 每次发布会自动生成中文的“新增功能 / 问题修复 / 其他改进”摘要，重跑时更新自动摘要并保留手写说明。支持中文提交说明、`Release-Note-zh` 提交正文及版本级说明文件，详见 [中文发布说明](release-notes/README.md)。
 
