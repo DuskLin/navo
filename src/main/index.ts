@@ -102,6 +102,14 @@ function createWindow(): void {
     }
   })
   window.once('ready-to-show', () => window.show())
+  const publishVisibility = () => {
+    if (!window.webContents.isDestroyed())
+      window.webContents.send(IPC.windowVisibility, window.isVisible() && !window.isMinimized())
+  }
+  window.on('show', publishVisibility)
+  window.on('hide', publishVisibility)
+  window.on('minimize', publishVisibility)
+  window.on('restore', publishVisibility)
   window.on('close', (event) => {
     if (quitting || !tray || tray.isDestroyed()) return
     event.preventDefault()
@@ -381,7 +389,13 @@ void app
       })
       return saved
     })
-    handle(IPC.gatewayGet, () => service.snapshot())
+    handle(IPC.windowVisibility, (_value, event) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      return !!window && window.isVisible() && !window.isMinimized()
+    })
+    handle(IPC.gatewayGet, (version) =>
+      service.snapshotUpdate(typeof version === 'number' ? version : undefined)
+    )
     handle(IPC.dashboardGet, () => dashboard!.state())
     handle(IPC.dashboardSave, (value) => dashboard!.save(value))
     handle(IPC.dashboardRotate, () => dashboard!.rotate())
@@ -404,15 +418,15 @@ void app
     handle(IPC.quotaCycles, (query) => service.history.getQuotaCycles(query))
     handle(IPC.quotaCycleExclude, (input) => {
       service.history.setQuotaCycleExcluded(input)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.usageStats, (query) => {
-      const data = gatewayStore.get()
-      return statistics.usage(query as import('../shared/usage').UsageQuery, {
-        accounts: data.accounts.map(({ id, provider }) => ({ id, provider })),
-        modelPrices: data.modelPrices,
-        modelPriceCatalog: service.pricing.snapshot()
-      })
+      const pricing = service.getRequestPricing()
+      return statistics.usage(
+        query as import('../shared/usage').UsageQuery,
+        pricing.value,
+        pricing.version
+      )
     })
     handle(IPC.accountImportKimi, (region) => service.importKimiAccount(region))
     handle(IPC.accountImportCodex, () => service.importCodexAccount())
@@ -423,26 +437,26 @@ void app
     handle(IPC.accountDelete, async (value) => {
       await gatewayStore.deleteAccount(value)
       service.scheduler.prune(gatewayStore.get().accounts)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.accountReset, (value) => {
       const id = string(value, '账号 ID')
       if (!gatewayStore.get().accounts.some((a) => a.id === id)) throw new Error('账号不存在')
       service.scheduler.reset(id)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.modelPriceRefresh, async (force) => {
       if (force !== undefined && typeof force !== 'boolean') throw new Error('刷新参数无效')
       await service.pricing.refresh(force as boolean | undefined)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.quotaCardOrderSave, async (value) => {
       await gatewayStore.saveQuotaCardOrder(value)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.modelPriceSave, async (value) => {
       await gatewayStore.saveModelPrice(value)
-      return service.snapshot()
+      return service.snapshotReady()
     })
     handle(IPC.gatewaySave, (value) => service.saveSettings(value))
     handle(IPC.gatewayRunning, (value) => service.setRunning(value))

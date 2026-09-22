@@ -935,7 +935,7 @@ try {
     await page.getByRole('button', { name: '额度页', exact: true }).getAttribute('aria-pressed'),
     'true'
   )
-  await page.getByText('5,500', { exact: true }).waitFor()
+  await page.getByRole('img', { name: '5,500', exact: true }).waitFor()
   const autoRefresh = page.getByRole('button', { name: '切换自动刷新间隔', exact: true })
   for (const label of ['5s', '15s', '30s']) {
     assert.equal(await autoRefresh.textContent(), label)
@@ -1061,7 +1061,10 @@ try {
   assert.equal(await costCard.getByText('估算均值', { exact: false }).count(), 2)
   assert.equal(await costCard.getByText('缓存命中率', { exact: false }).count(), 2)
   assert.equal(
-    await costCard.locator('.quota-cost-estimate').getByText('80%', { exact: true }).count(),
+    await costCard
+      .locator('.quota-cost-estimate')
+      .getByRole('img', { name: '80%', exact: true })
+      .count(),
     2
   )
   await page.screenshot({ path: join(artifacts, 'quota-cost-estimates.png') })
@@ -1221,6 +1224,7 @@ try {
     .first()
     .getByRole('button', { name: '查看请求费用明细', exact: true })
   await costButton.scrollIntoViewIfNeeded()
+  await costButton.hover()
   await costButton.focus()
   const costTooltip = page.getByRole('tooltip').filter({ hasText: '请求费用明细' })
   await costTooltip.getByText('缓存读取', { exact: true }).waitFor()
@@ -1286,8 +1290,8 @@ try {
   await page.getByLabel('账号名称', { exact: true }).fill('DeepSeek 测试账号')
   await page.getByLabel('API Key', { exact: true }).fill('smoke-deepseek-key')
   await page.getByLabel('API Key', { exact: true }).press('Tab')
-  await page.getByText('CNY 12.5', { exact: true }).waitFor()
-  await page.getByText('USD 2.75', { exact: true }).waitFor()
+  await page.getByRole('img', { name: 'CNY 12.5', exact: true }).waitFor()
+  await page.getByRole('img', { name: 'USD 2.75', exact: true }).waitFor()
   assert.equal(
     await page.getByLabel('上游 Base URL', { exact: true }).inputValue(),
     'https://api.deepseek.com/v1'
@@ -1302,7 +1306,7 @@ try {
   await page
     .getByRole('row')
     .filter({ hasText: 'DeepSeek 测试账号' })
-    .getByText('USD 2.75', { exact: true })
+    .getByRole('img', { name: 'USD 2.75', exact: true })
     .waitFor()
   await application.close()
   application = undefined
@@ -1475,14 +1479,14 @@ try {
     name: 'kimi-for-coding-highspeed 峰谷表现',
     exact: true
   })
-  await performanceTable.getByText('180ms', { exact: true }).waitFor()
-  await performanceTable.getByText('1.26s', { exact: true }).waitFor()
-  await performanceTable.getByText('62.9 tokens/s', { exact: true }).waitFor()
-  await performanceTable.getByText('45.6 tokens/s', { exact: true }).waitFor()
+  await performanceTable.getByRole('img', { name: '180ms', exact: true }).waitFor()
+  await performanceTable.getByRole('img', { name: '1.26s', exact: true }).waitFor()
+  await performanceTable.getByRole('img', { name: '62.9 tokens/s', exact: true }).waitFor()
+  await performanceTable.getByRole('img', { name: '45.6 tokens/s', exact: true }).waitFor()
   assert.equal(
     await page
       .getByRole('table', { name: 'k3 峰谷表现', exact: true })
-      .getByText('—', { exact: true })
+      .getByRole('img', { name: '—', exact: true })
       .count(),
     2
   )

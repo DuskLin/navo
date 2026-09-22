@@ -15,6 +15,7 @@
     "build": "npm run typecheck && electron-vite build && vite build --config vite.mobile.config.ts",
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "tsc -p tsconfig.test.json && node --test artifacts/tests/tests/*.test.js",
+    "test:cpu": "tsc -p tsconfig.test.json && node scripts/cpu-performance.mjs",
     "test:kimi-network": "tsc -p tsconfig.test.json && node scripts/kimi-auth-network-smoke.mjs",
     "test:migration:kimi": "tsc -p tsconfig.test.json && node scripts/session-migration-kimi-test.mjs",
     "test:installed": "node scripts/test-installed.mjs",

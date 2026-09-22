@@ -136,8 +136,10 @@ test(
     const f = await fixture()
     try {
       const session = await f.launch()
-      await writeFile(join(session, 'control'), `${Math.floor(Date.now() / 1000) + 2} 1\n`)
+      // 先确认辅助进程启用，再缩短租期；避免高负载下启动阶段就耗尽两秒窗口。
+      await writeFile(join(session, 'control'), `${Math.floor(Date.now() / 1000) + 10} 1\n`)
       await until(async () => (await readFile(f.state, 'utf8')) === '1')
+      await writeFile(join(session, 'control'), `${Math.floor(Date.now() / 1000) + 1} 1\n`)
       await until(async () => (await readFile(f.state, 'utf8')) === '0')
     } finally {
       await f.clean()

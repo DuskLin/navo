@@ -107,6 +107,7 @@ export function parseModelPriceCatalog(value: unknown): DefaultModelPrice[] {
 }
 
 export class ModelPriceCatalog {
+  revision = 0
   private state: ModelPriceCatalogSnapshot = { prices: [], entries: [], updatedAt: null, error: '' }
   private pending?: Promise<void>
   private retryAt = 0
@@ -170,9 +171,12 @@ export class ModelPriceCatalog {
         updatedAt: data.updatedAt as number,
         error: ''
       }
+      this.revision++
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT')
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.state.error = '默认价格缓存不可用，请刷新价格'
+        this.revision++
+      }
     }
   }
   refresh(force = false): Promise<void> {
@@ -228,6 +232,7 @@ export class ModelPriceCatalog {
       })
       await rename(`${this.file}.tmp`, this.file)
       this.state = { prices, entries, updatedAt, error: '' }
+      this.revision++
       this.retryAt = 0
       this.needsMetadataRefresh = false
     } catch {
@@ -235,6 +240,7 @@ export class ModelPriceCatalog {
       this.state.error = this.state.updatedAt
         ? '默认价格更新失败，继续使用上次缓存，可稍后重试'
         : '默认价格获取失败，请检查网络后重试；手动价格仍可使用'
+      this.revision++
     }
   }
 }

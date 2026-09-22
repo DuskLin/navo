@@ -1,3 +1,4 @@
+import { startVisiblePolling } from './visible-polling'
 import { useEffect, useId, useState } from 'react'
 import { Activity, ArrowDown, ArrowUp, CircleSlash, DollarSign, Sparkles, Zap } from 'lucide-react'
 import type { UsageStats, UsageTotals } from '../../shared/usage'
@@ -230,7 +231,6 @@ export function UsageDashboard({
   const [retry, setRetry] = useState(0)
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout>
     const load = async () => {
       if (active) setLoading(true)
       const start = new Date()
@@ -266,12 +266,11 @@ export function UsageDashboard({
       } finally {
         if (active) setLoading(false)
       }
-      if (active && interval) timer = setTimeout(() => void load(), interval)
     }
-    void load()
+    const stopPolling = startVisiblePolling(load, interval)
     return () => {
       active = false
-      clearTimeout(timer)
+      stopPolling()
     }
   }, [interval, onAccountStats, retry, showTokenActivity])
   const s = data?.summary

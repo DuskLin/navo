@@ -40,7 +40,8 @@ import { RequestHistory } from './request-history'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import type { TokenUsage, UsageProtocol } from '../../shared/usage'
 import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
-import { estimateQuotaCost, quotaCacheHitRate } from '../../shared/quota-cost'
+import { QuotaStatistics } from './quota-statistics'
+import type { RequestPricing } from '../../shared/request-cost'
 import { requestSessionId } from '../../shared/request-session'
 import { openCodeSession } from '../../shared/opencode-go'
 import { modelUpstreamRoute } from '../../shared/model-protocols'
@@ -132,6 +133,11 @@ export class Gateway {
   private error = ''
   private requests: RequestRecord[] = []
   readonly history: RequestHistory
+  private readonly quotaStatistics: QuotaStatistics
+  private pricingInputVersion = ''
+  private pricingKey = ''
+  private requestPricing?: { value: RequestPricing; version: number }
+  private catalogRevision = -1
   private refreshTimer?: ReturnType<typeof setInterval>
   private refreshWork?: Promise<void>
   private refreshController?: AbortController
@@ -151,16 +157,64 @@ export class Gateway {
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
     this.requests = this.history.page().records
+    this.quotaStatistics = new QuotaStatistics(
+      store.historyPath,
+      this.history,
+      () => `${store.revision}:${this.pricing.revision}`
+    )
+  }
+  getRequestPricing(): { value: RequestPricing; version: number } {
+    const inputVersion = `${this.store.revision}:${this.pricing.revision}`
+    if (this.requestPricing && inputVersion === this.pricingInputVersion) return this.requestPricing
+    const data = this.store.get()
+    const accounts = data.accounts.map(({ id, provider }) => ({ id, provider }))
+    const key = JSON.stringify([accounts, data.modelPrices, this.pricing.revision])
+    if (!this.requestPricing || key !== this.pricingKey) {
+      const catalog =
+        this.catalogRevision === this.pricing.revision && this.requestPricing
+          ? this.requestPricing.value.modelPriceCatalog
+          : this.pricing.snapshot()
+      this.catalogRevision = this.pricing.revision
+      this.requestPricing = {
+        version: (this.requestPricing?.version ?? 0) + 1,
+        value: { accounts, modelPrices: data.modelPrices, modelPriceCatalog: catalog }
+      }
+      this.pricingKey = key
+    }
+    this.pricingInputVersion = inputVersion
+    return this.requestPricing
   }
   snapshot(): GatewaySnapshot {
+    return { ...this.snapshotState(), modelPriceCatalog: this.pricing.snapshot() }
+  }
+  async snapshotReady(): Promise<GatewaySnapshot> {
+    // 用户提交配置后等待当前统计，但持续请求期间不无限等待一个静止的数据版本。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const version = `${this.store.revision}:${this.pricing.revision}:${this.history.revision}`
+      this.snapshotState()
+      await this.quotaStatistics.whenIdle()
+      if (version === `${this.store.revision}:${this.pricing.revision}:${this.history.revision}`)
+        break
+    }
+    return this.snapshot()
+  }
+  snapshotUpdate(knownCatalogVersion?: number): import('../../shared/contracts').GatewayUpdate {
+    return {
+      ...this.snapshotState(),
+      catalogVersion: this.pricing.revision,
+      ...(knownCatalogVersion === this.pricing.revision
+        ? {}
+        : { modelPriceCatalog: this.pricing.snapshot() })
+    }
+  }
+  private snapshotState(): Omit<GatewaySnapshot, 'modelPriceCatalog'> {
     const data = this.store.get()
-    const snapshot: GatewaySnapshot = {
+    const snapshot: Omit<GatewaySnapshot, 'modelPriceCatalog'> = {
       activeRequestCount: this.controllers.size,
       liveFlows: this.liveFlows.snapshot(),
       settings: data.settings,
       modelPrices: data.modelPrices,
       quotaCardOrder: data.quotaCardOrder,
-      modelPriceCatalog: this.pricing.snapshot(),
       groups: data.groups.map(({ key: _key, ...group }) => group),
       accounts: data.accounts.map(({ credential, ...account }) => ({
         ...account,
@@ -175,42 +229,8 @@ export class Gateway {
       error: this.error,
       requests: [...this.requests]
     }
-    for (const account of snapshot.accounts) {
-      const caps = account.capabilities
-      if (!caps?.quota) continue
-      account.quotaEstimates = {}
-      for (const [key, duration] of [
-        ['fiveHour', 5 * 3600000],
-        ['weekly', 7 * 86400000]
-      ] as const) {
-        const window = caps.quota[key]
-        const reset = Date.parse(window?.resetAt ?? '')
-        const records =
-          Number.isFinite(reset) && reset > Date.now()
-            ? this.history.quotaUsage(account.id, reset - duration, caps.checkedAt)
-            : []
-        account.quotaEstimates[key] = estimateQuotaCost(
-          window,
-          duration,
-          caps.checkedAt,
-          records,
-          snapshot
-        )
-        account.quotaEstimates[key].averages = this.history.quotaAverages(
-          account.id,
-          key,
-          window?.resetAt,
-          caps.checkedAt,
-          account.quotaEstimates[key]
-        )
-        account.quotaEstimates[key].cacheHitRate = quotaCacheHitRate(
-          window,
-          duration,
-          caps.checkedAt,
-          records
-        )
-      }
-    }
+    const pricing = this.getRequestPricing()
+    this.quotaStatistics.apply(snapshot.accounts, pricing.value, pricing.version)
     return snapshot
   }
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
@@ -226,7 +246,7 @@ export class Gateway {
         if (this.controllers.size) throw new Error('网关使用中，请在请求结束后重试')
         await this.stop()
       }
-      return this.snapshot()
+      return this.snapshotReady()
     })
   }
   shutdown(): Promise<void> {
@@ -236,6 +256,7 @@ export class Gateway {
       this.refreshController?.abort(new Error('应用正在退出'))
       await this.stop()
       await this.refreshWork
+      await this.quotaStatistics.close()
     })
   }
   /** Account monitoring belongs to the application lifecycle, not the HTTP listener. */
@@ -308,19 +329,19 @@ export class Gateway {
       await this.store.mutate((data) => {
         data.settings = settings
       })
-      return this.snapshot()
+      return this.snapshotReady()
     })
   }
   async importKimiAccount(region: unknown): Promise<GatewaySnapshot> {
     if (region !== 'mainland-cn' && region !== 'global') throw new Error('账号区域无效')
     const id = await this.kimi.importLocal(region)
     this.scheduler.reset(id)
-    return this.snapshot()
+    return this.snapshotReady()
   }
   async importCodexAccount(): Promise<GatewaySnapshot> {
     const id = await this.codex.importLocal()
     this.scheduler.reset(id)
-    return this.snapshot()
+    return this.snapshotReady()
   }
   async saveAccount(value: unknown): Promise<GatewaySnapshot> {
     const input = validateAccount(value, this.store.get().groups)
@@ -332,12 +353,12 @@ export class Gateway {
       if (!old || old.kind !== 'oauth' || old.provider !== 'kimi' || old.region !== input.region)
         throw new Error('请先导入对应区域的本地 Kimi 登录态')
       await this.store.saveAccount(input, old.capabilities ?? undefined)
-      return this.snapshot()
+      return this.snapshotReady()
     }
     if (input.provider === 'codex') {
       if (!old || old.provider !== 'codex') throw new Error('请先导入本地 Codex 认证')
       await this.store.saveAccount(input, old.capabilities ?? undefined)
-      return this.snapshot()
+      return this.snapshotReady()
     }
     const key = input.secret || old?.credential.accessToken
     if (!key) throw new Error('请填写 API Key')
@@ -370,7 +391,7 @@ export class Gateway {
     )
       this.scheduler.reset(id)
     this.scheduler.prune(this.store.get().accounts)
-    return this.snapshot()
+    return this.snapshotReady()
   }
   async inspectAccount(value: unknown): Promise<AccountCapabilities> {
     const input = object(value)
@@ -483,7 +504,7 @@ export class Gateway {
     const id = string(value, '账号 ID')
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
-    if (old.provider === 'custom' && old.modelSource === 'manual') return this.snapshot()
+    if (old.provider === 'custom' && old.modelSource === 'manual') return this.snapshotReady()
     const credential =
       old.provider === 'codex'
         ? await this.codex.credential(old.id)
@@ -541,7 +562,7 @@ export class Gateway {
         )
       )
     })
-    return this.snapshot()
+    return this.snapshotReady()
   }
   refreshStaleAccounts(): Promise<void> {
     if (!this.refreshWork) {
@@ -582,7 +603,7 @@ export class Gateway {
         if (!group) throw new Error('分组不存在')
         group.key = randomBytes(32).toString('hex')
       })
-      return this.snapshot()
+      return this.snapshotReady()
     })
   }
   connection(value: unknown): string {

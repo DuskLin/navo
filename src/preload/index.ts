@@ -1,8 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type HelperApi } from '../shared/contracts'
+import { createGatewayReader } from '../shared/gateway-reader'
 
 // 仅暴露白名单业务方法，不允许渲染进程任意调用 IPC。
 const api: HelperApi = {
+  onWindowVisibilityChange: (listener) => {
+    let active = true
+    let received = false
+    const handler = (_event: Electron.IpcRendererEvent, visible: boolean) => {
+      received = true
+      if (active) listener(visible)
+    }
+    ipcRenderer.on(IPC.windowVisibility, handler)
+    void ipcRenderer
+      .invoke(IPC.windowVisibility)
+      .then((visible: boolean) => {
+        if (active && !received) listener(visible)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+      ipcRenderer.removeListener(IPC.windowVisibility, handler)
+    }
+  },
   onMigrationProgress: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
@@ -37,7 +57,7 @@ const api: HelperApi = {
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   getSleepProtection: () => ipcRenderer.invoke(IPC.sleepProtectionGet),
   saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings),
-  getGateway: () => ipcRenderer.invoke(IPC.gatewayGet),
+  getGateway: createGatewayReader((version) => ipcRenderer.invoke(IPC.gatewayGet, version)),
   getRequestHistory: (before) => ipcRenderer.invoke(IPC.requestHistory, before),
   getQuotaCycles: (query) => ipcRenderer.invoke(IPC.quotaCycles, query),
   setQuotaCycleExcluded: (input) => ipcRenderer.invoke(IPC.quotaCycleExclude, input),

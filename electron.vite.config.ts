@@ -9,7 +9,8 @@ export default defineConfig({
         input: {
           index: resolve('src/main/index.ts'),
           'session-migration-worker': resolve('src/main/services/session-migration-worker.ts'),
-          'request-history-worker': resolve('src/main/services/request-history-worker.ts')
+          'request-history-worker': resolve('src/main/services/request-history-worker.ts'),
+          'quota-statistics-worker': resolve('src/main/services/quota-statistics-worker.ts')
         },
         output: { entryFileNames: '[name].js' }
       }

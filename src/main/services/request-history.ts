@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { RequestHistoryPage, RequestRecord } from '../../shared/contracts'
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
-import { requestCost, type RequestPricing } from '../../shared/request-cost'
+import { createRequestCostCalculator, type RequestPricing } from '../../shared/request-cost'
 import { localDayKey, summarizeActivity } from '../../shared/usage'
 import type { QuotaCostCycle, QuotaCostEstimate, QuotaCycleQuery } from '../../shared/quota-cost'
 
@@ -24,10 +24,17 @@ const REQUEST_RETENTION_MS = 90 * 86400000
 
 /** 仅保留最近 90 天的请求摘要；按游标分页，避免将全部历史加载进内存。 */
 export class RequestHistory {
+  revision = 0
+  private quotaEpoch = 0
+  private accountRevisions = new Map<string, number>()
+  private observedVersion?: number
   private cleanupTimer?: ReturnType<typeof setInterval>
   private db: DatabaseSync
   private quotaRecords = new Map<string, { start: number; end: number; records: RequestRecord[] }>()
-  constructor(file: string, readOnly = false) {
+  constructor(
+    file: string,
+    private readonly readOnly = false
+  ) {
     if (readOnly) {
       this.db = new DatabaseSync(file, { readOnly: true })
       return
@@ -72,7 +79,12 @@ export class RequestHistory {
     const result = this.db
       .prepare("DELETE FROM requests WHERE json_extract(record, '$.time') < ?")
       .run(Date.now() - REQUEST_RETENTION_MS)
-    if (result.changes) this.quotaRecords.clear()
+    if (result.changes) {
+      this.quotaRecords.clear()
+      this.accountRevisions.clear()
+      this.quotaEpoch++
+      this.revision++
+    }
   }
   append(record: RequestRecord): void {
     this.prune()
@@ -81,8 +93,22 @@ export class RequestHistory {
       .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
       .run(record.id, JSON.stringify(record))
     this.quotaRecords.clear()
+    this.revision++
+    if (record.accountId)
+      this.accountRevisions.set(
+        record.accountId,
+        (this.accountRevisions.get(record.accountId) ?? 0) + 1
+      )
+  }
+  quotaRevision(accountId: string): string {
+    return `${this.quotaEpoch}:${this.accountRevisions.get(accountId) ?? 0}`
   }
   quotaUsage(accountId: string, start: number, end: number): RequestRecord[] {
+    if (this.readOnly) {
+      const version = this.dataVersion
+      if (version !== this.observedVersion) this.quotaRecords.clear()
+      this.observedVersion = version
+    }
     const key = `${accountId}:${start}`
     const cached = this.quotaRecords.get(key)
     if (cached?.start === start && cached.end === end) return cached.records
@@ -183,6 +209,11 @@ export class RequestHistory {
         new Date(input.resetAt).toISOString()
       )
     if (!result.changes) throw new Error('周期记录不存在，请刷新后重试')
+    this.revision++
+    this.accountRevisions.set(
+      query.accountId,
+      (this.accountRevisions.get(query.accountId) ?? 0) + 1
+    )
   }
   page(before?: number): RequestHistoryPage {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
@@ -209,22 +240,45 @@ export class RequestHistory {
   get dataVersion(): number {
     return Number(this.db.prepare('PRAGMA data_version').get()!.data_version)
   }
-  usageSnapshot(query: UsageQuery, pricing?: RequestPricing): UsageStats {
+  /** 活跃天数在跨日或未来记录进入时间范围时才会自行变化。 */
+  usageCacheExpiry(query: UsageQuery, now = Date.now()): number {
+    if (!query.allHistory || query.bucketMs !== 86400000 || query.end <= now) return Infinity
+    const midnight = new Date(now)
+    midnight.setHours(24, 0, 0, 0)
+    const next = this.db
+      .prepare(
+        "SELECT MIN(json_extract(record, '$.time')) AS time FROM requests WHERE json_extract(record, '$.time') > ? AND json_extract(record, '$.time') < ?"
+      )
+      .get(now, query.end)!
+    return Math.min(+midnight, next.time == null ? Infinity : Number(next.time))
+  }
+  usageSnapshot(
+    query: UsageQuery,
+    pricing?: RequestPricing,
+    calculate?: ReturnType<typeof createRequestCostCalculator>
+  ): UsageStats {
+    return this.readSnapshot(() => this.usage(query, pricing, calculate))
+  }
+  readSnapshot<T>(read: () => T): T {
     this.db.exec('BEGIN')
     try {
-      return this.usage(query, pricing)
+      return read()
     } finally {
       this.db.exec('ROLLBACK')
     }
   }
-  usage(query: UsageQuery, pricing?: RequestPricing): UsageStats {
+  usage(
+    query: UsageQuery,
+    pricing?: RequestPricing,
+    calculate = pricing ? createRequestCostCalculator(pricing) : undefined
+  ): UsageStats {
     const costs = new Map<string, string>()
     if (pricing)
       this.db.function('request_cost', (raw) => {
         const key = String(raw)
         let value = costs.get(key)
         if (value === undefined) {
-          const calculated = requestCost(JSON.parse(key) as RequestRecord, pricing)
+          const calculated = calculate!(JSON.parse(key) as RequestRecord)
           value = JSON.stringify(
             Object.fromEntries(calculated.amounts.map((p) => [p.currency, p.value]))
           )
