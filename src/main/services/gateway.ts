@@ -1077,14 +1077,16 @@ export class Gateway {
             res.end()
           }
           if (interruption) {
-            finalStatus = 502
-            this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
+            finalStatus = timedOut ? 504 : 502
+            if (!controller.signal.aborted)
+              this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
           } else if (upstream.ok) this.scheduler.success(account.id, Date.now() - attemptStarted)
           else this.scheduler.failure(account.id, upstream.status, settings.cooldownSeconds)
           return
         } catch (error) {
           if (error instanceof ProtocolError && error.status === 400) throw error
-          if (!disconnected && (!controller.signal.aborted || timedOut))
+          // 本地总超时、客户端取消和网关退出不代表账号故障。
+          if (!controller.signal.aborted)
             this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
           if (error instanceof ProtocolError && !res.headersSent && !controller.signal.aborted)
             throw error
@@ -1107,7 +1109,7 @@ export class Gateway {
         }
       }
       if (controller.signal.aborted)
-        throw new HttpError(timedOut ? 504 : 503, timedOut ? '上游请求超时' : '网关已停止')
+        throw new HttpError(timedOut ? 504 : 503, timedOut ? '网关请求总超时' : '网关已停止')
       res.setHeader('retry-after', String(settings.cooldownSeconds))
       throw new HttpError(503, '无可用账号：请检查凭据、模型、并发上限、额度或冷却状态')
     } catch (error) {
@@ -1120,7 +1122,7 @@ export class Gateway {
         res,
         finalStatus,
         timedOut
-          ? '上游请求超时'
+          ? '网关请求总超时'
           : error instanceof HttpError || error instanceof ProtocolError
             ? error.message
             : '本地网关处理失败'
