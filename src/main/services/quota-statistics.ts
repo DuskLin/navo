@@ -81,12 +81,19 @@ export class QuotaStatistics {
         if (cached?.fingerprint === fingerprint)
           account.quotaEstimates[window] = structuredClone(cached.estimate)
         else {
-          // 不能将过期周期或旧价格的结果当作当前估算展示。
-          account.quotaEstimates[window] = {
-            amounts: [],
-            reason: now < this.retryAt ? '额度估算暂不可用，稍后重试' : '额度估算更新中',
-            cacheHitRate: null
-          }
+          // 同一有效周期保留整组上次结果，避免每次重算都先把数字清空。
+          // 只改变返回的展示状态，不把旧结果当作新版本缓存或重复写入周期历史。
+          account.quotaEstimates[window] =
+            cached &&
+            Number.isFinite(reset) &&
+            reset > now &&
+            Date.parse(cached.quota?.resetAt ?? '') === reset
+              ? { ...structuredClone(cached.estimate), refreshing: true }
+              : {
+                  amounts: [],
+                  reason: now < this.retryAt ? '额度估算暂不可用，稍后重试' : '额度估算更新中',
+                  cacheHitRate: null
+                }
           tasks.push(task)
         }
       }

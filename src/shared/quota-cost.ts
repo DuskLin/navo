@@ -17,6 +17,8 @@ export interface QuotaCostCycle {
 }
 
 export interface QuotaCostEstimate {
+  /** 后台正在更新；当前数字仍为同一有效周期的上次结果。 */
+  refreshing?: boolean
   reason?: string
   cacheHitRate?: number | null
   averages?: { currency: 'USD' | 'CNY'; total: number; cycles: number }[]

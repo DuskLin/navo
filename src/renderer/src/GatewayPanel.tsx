@@ -647,7 +647,8 @@ function QuotaDetails({
               {showEstimates && estimate && (
                 <div
                   className="quota-cost-estimate"
-                  title="按本周期截至额度同步时的本地请求费用 ÷ 已用比例估算。费用优先采用上游报告，否则按当前模型价格计算；外部用量、缺失记录和百分比精度会影响结果，不代表官方余额。"
+                  aria-busy={estimate.refreshing || undefined}
+                  title={`${estimate.refreshing ? '正在更新，暂显示本周期上次结果。' : ''}按本周期截至额度同步时的本地请求费用 ÷ 已用比例估算。费用优先采用上游报告，否则按当前模型价格计算；外部用量、缺失记录和百分比精度会影响结果，不代表官方余额。`}
                 >
                   {estimate.amounts.length ? (
                     estimate.amounts.map((amount) => {
