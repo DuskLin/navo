@@ -1,6 +1,6 @@
 {
   "name": "navo",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Navo：多供应商 AI 账号、模型与本地网关桌面管理工具",
   "main": "out/main/index.js",
   "author": "Navo contributors",
