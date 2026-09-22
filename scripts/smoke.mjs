@@ -249,6 +249,7 @@ await writeFile(
   const custom = require('node:util').promisify.custom;
   childProcess.execFile[custom] = originalExecFile[custom];
   const { Tray } = require('electron');
+  globalThis.smokeWorker = require('node:worker_threads').Worker;
   const setContextMenu = Tray.prototype.setContextMenu;
   Tray.prototype.setContextMenu = function (menu) {
     globalThis.smokeTray = this;
@@ -1068,6 +1069,41 @@ try {
     2
   )
   await page.screenshot({ path: join(artifacts, 'quota-cost-estimates.png') })
+  // 延迟真实统计 Worker，确保界面实际渲染过刷新中的快照，而不只是验证最终数值。
+  const quotaLabels = () =>
+    costCard
+      .locator('.quota-cost-estimate .rolling-number')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')))
+  const beforeRefresh = await quotaLabels()
+  await application.evaluate(() => {
+    const Worker = globalThis.smokeWorker
+    const original = Worker.prototype.postMessage
+    globalThis.restoreQuotaWorker = () => {
+      Worker.prototype.postMessage = original
+    }
+    Worker.prototype.postMessage = function (message, ...args) {
+      if (Array.isArray(message?.tasks)) {
+        setTimeout(() => original.call(this, message, ...args), 2500)
+        return
+      }
+      return original.call(this, message, ...args)
+    }
+  })
+  try {
+    await page.evaluate((id) => {
+      window.quotaRefreshForSmoke = window.navo.refreshAccount(id)
+    }, estimatedAccount.id)
+    await costCard.locator('.quota-cost-estimate[aria-busy="true"]').first().waitFor()
+    assert.deepEqual(await quotaLabels(), beforeRefresh, '刷新中不得将已显示的数字清空')
+    await page.evaluate(() => window.quotaRefreshForSmoke)
+    await costCard
+      .locator('.quota-cost-estimate[aria-busy="true"]')
+      .first()
+      .waitFor({ state: 'hidden' })
+    assert.deepEqual(await quotaLabels(), beforeRefresh)
+  } finally {
+    await application.evaluate(() => globalThis.restoreQuotaWorker())
+  }
   await costCard.getByRole('button', { name: '管理 开发账号 B 5H 统计周期', exact: true }).click()
   const cycleDialog = page.getByRole('dialog', { name: '开发账号 B · 5H 统计周期', exact: true })
   await cycleDialog.getByRole('button', { name: '排除统计', exact: true }).click()

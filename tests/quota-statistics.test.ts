@@ -143,6 +143,113 @@ test('请求追加、价格修改、排除周期和到期均使对应额度统�
   }
 })
 
+test('同周期后台刷新期间保留整组数字，新结果就绪后一起替换', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-no-flicker-'))
+  const file = join(dir, 'history.sqlite')
+  const history = new RequestHistory(file)
+  const service = new QuotaStatistics(file, history, () => '1')
+  try {
+    history.append(record)
+    const a = account()
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    const previous = structuredClone(a.quotaEstimates!)
+
+    history.append({ ...record, id: 'second', usage: { ...record.usage!, cacheRead: 0 } })
+    a.capabilities = { ...a.capabilities!, checkedAt: now + 1 }
+    for (let i = 0; i < 20; i++) {
+      service.apply([a], pricing, 1)
+      for (const window of ['fiveHour', 'weekly'] as const) {
+        const { refreshing, ...shown } = a.quotaEstimates![window]!
+        assert.equal(refreshing, true)
+        assert.deepEqual(shown, previous[window], '金额、均值、命中率不能先清空')
+      }
+    }
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    assert.equal(a.quotaEstimates!.fiveHour!.refreshing, undefined)
+    assert.ok(a.quotaEstimates!.fiveHour!.amounts[0].used > previous.fiveHour!.amounts[0].used)
+    assert.notEqual(a.quotaEstimates!.fiveHour!.cacheHitRate, previous.fiveHour!.cacheHitRate)
+    assert.equal(
+      a.quotaEstimates!.fiveHour!.averages![0].total,
+      a.quotaEstimates!.fiveHour!.amounts[0].total
+    )
+
+    const latest = structuredClone(a.quotaEstimates!.fiveHour!)
+    const changed = {
+      ...pricing,
+      modelPrices: pricing.modelPrices.map((p) => ({ ...p, input: 0 }))
+    }
+    service.apply([a], changed, 2)
+    assert.deepEqual(a.quotaEstimates!.fiveHour, { ...latest, refreshing: true })
+    await service.whenIdle()
+    service.apply([a], changed, 2)
+    assert.ok(a.quotaEstimates!.fiveHour!.amounts[0].used < latest.amounts[0].used)
+    assert.equal(a.quotaEstimates!.fiveHour!.refreshing, undefined)
+  } finally {
+    await service.close()
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('周期到期、切换或缺少重置时间时不会沿用上一周期的金额', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-cycle-display-'))
+  const file = join(dir, 'history.sqlite')
+  const history = new RequestHistory(file)
+  const service = new QuotaStatistics(file, history, () => '1')
+  try {
+    history.append(record)
+    const a = account()
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    assert.ok(a.quotaEstimates!.fiveHour!.amounts.length)
+
+    service.apply([a], pricing, 1, Date.parse(quota.resetAt))
+    assert.deepEqual(a.quotaEstimates!.fiveHour!.amounts, [])
+    const changed = structuredClone(account())
+    changed.capabilities!.quota!.fiveHour!.resetAt = new Date(now + 2 * 3600000).toISOString()
+    service.apply([changed], pricing, 1)
+    assert.deepEqual(changed.quotaEstimates!.fiveHour!.amounts, [])
+    changed.capabilities!.quota!.fiveHour!.resetAt = null
+    service.apply([changed], pricing, 1)
+    assert.deepEqual(changed.quotaEstimates!.fiveHour!.amounts, [])
+  } finally {
+    await service.close()
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('刷新失败后的重试等待仍保留同周期数字', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-retry-display-'))
+  const file = join(dir, 'history.sqlite')
+  const history = new RequestHistory(file)
+  const service = new QuotaStatistics(file, history, () => '1')
+  try {
+    history.append(record)
+    const a = account()
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    const previous = structuredClone(a.quotaEstimates!.fiveHour!)
+    t.mock.method(history, 'quotaAverages', () => {
+      throw new Error('临时读取失败')
+    })
+    history.append({ ...record, id: 'second' })
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    assert.deepEqual(a.quotaEstimates!.fiveHour, { ...previous, refreshing: true })
+  } finally {
+    await service.close()
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('运行中多次修改只提交最新结果；删除账号和关闭服务后不写回旧任务', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'navo-quota-race-'))
   const file = join(dir, 'history.sqlite')
