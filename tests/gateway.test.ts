@@ -1816,13 +1816,16 @@ test('首 token 从请求开始计时并包含重试，跳过响应头和初始�
 
 test('流式 SSE 原样到达，客户端断开释放槽位，输出后不重试', async () => {
   let calls = 0
-  const f = await gatewayFixture((_req, res) => {
-    calls++
-    res.writeHead(200, { 'content-type': 'text/event-stream' })
-    res.write('event: message_start\ndata: {"type":"message_start"}\n\n')
-    const timer = setTimeout(() => res.end('data: [DONE]\n\n'), 100)
-    res.on('close', () => clearTimeout(timer))
-  })
+  const f = await gatewayFixture(
+    (_req, res) => {
+      calls++
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('event: message_start\ndata: {"type":"message_start"}\n\n')
+      const timer = setTimeout(() => res.end('data: [DONE]\n\n'), 100)
+      res.on('close', () => clearTimeout(timer))
+    },
+    ['a']
+  )
   try {
     const response = await f.post({ stream: true })
     assert.equal(response.headers.get('content-type'), 'text/event-stream')
@@ -1844,13 +1847,19 @@ test('流式 SSE 原样到达，客户端断开释放槽位，输出后不重试
       req.on('error', reject)
       req.end(JSON.stringify({ model: 'kimi-for-coding', stream: true }))
     })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await eventually(() => f.gateway.snapshot().requests.length === 2)
     assert.equal(calls, 2)
     assert.equal(f.gateway.snapshot().requests[0].interruption, 'client_disconnect')
+    assert.equal(f.gateway.snapshot().requests[0].status, 499)
     assert.equal(
       f.gateway.snapshot().accounts.reduce((n, a) => n + a.runtime.active, 0),
       0
     )
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.cooldownUntil, 0)
+    const next = await f.post({ stream: true })
+    assert.equal(next.status, 200)
+    await next.text()
+    assert.equal(calls, 3)
     assert.equal(
       f.gateway.snapshot().accounts.reduce((n, a) => n + a.runtime.failures, 0),
       0
@@ -1958,6 +1967,11 @@ test('有请求时禁止停止网关，全部流式请求结束后恢复；退�
     await consumed
     assert.equal(f.gateway.snapshot().activeRequestCount, 0)
     assert.equal(f.gateway.snapshot().requests[0].interruption, 'gateway_shutdown')
+    for (const { runtime } of f.gateway.snapshot().accounts) {
+      assert.equal(runtime.active, 0)
+      assert.equal(runtime.failures, 0)
+      assert.equal(runtime.cooldownUntil, 0)
+    }
   } finally {
     await f.cleanup()
   }
@@ -2072,20 +2086,140 @@ test('OAuth 必须本地导入，旧 OAuth 配置先备份再停用，不能转�
   }
 })
 
-test('真实上游超时返回 504，释放槽位并记录冷却', async () => {
-  const f = await gatewayFixture(() => {}, ['a'])
+test('本地总超时在收到响应头前返回 504，单账号立即可重试且不冷却', async () => {
+  let calls = 0
+  const f = await gatewayFixture(
+    (_req, res) => {
+      if (++calls > 1) res.end('{"ok":true}')
+    },
+    ['a']
+  )
   try {
-    await f.gateway.saveSettings({ ...f.store.get().settings, timeoutSeconds: 5 })
+    await f.gateway.saveSettings({
+      ...f.store.get().settings,
+      timeoutSeconds: 5,
+      cooldownSeconds: 300
+    })
     const response = await f.post()
     assert.equal(response.status, 504)
-    await response.text()
+    assert.equal((await response.json()).error.message, '网关请求总超时')
+    await eventually(() => f.gateway.snapshot().requests.length === 1)
     assert.equal(f.gateway.snapshot().accounts[0].runtime.active, 0)
-    assert.equal(f.gateway.snapshot().accounts[0].runtime.failures, 1)
-    assert.ok(f.gateway.snapshot().accounts[0].runtime.cooldownUntil > Date.now())
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.failures, 0)
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.successes, 0)
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.cooldownUntil, 0)
     assert.equal(f.gateway.snapshot().requests[0].status, 504)
     assert.equal(f.gateway.snapshot().requests[0].interruption, 'timeout')
+    assert.equal(f.gateway.snapshot().requests[0].attempts, 1)
+    const next = await f.post()
+    assert.equal(next.status, 200)
+    assert.deepEqual(await next.json(), { ok: true })
+    assert.equal(calls, 2)
   } finally {
     await f.cleanup()
+  }
+})
+
+for (const upstreamProtocol of ['responses', 'chat-completions'] as const) {
+  test(`Responses 持续输出触发本地总超时后不冷却，单账号可立即重试（上游 ${upstreamProtocol}）`, async () => {
+    let calls = 0
+    let chunks = 0
+    const delta =
+      upstreamProtocol === 'responses'
+        ? 'data: {"type":"response.output_text.delta","delta":"hello"}\n\n'
+        : 'data: {"choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\n'
+    const completion =
+      upstreamProtocol === 'responses'
+        ? 'data: {"type":"response.completed"}\n\n'
+        : 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+    const f = await gatewayFixture(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        if (++calls > 1) {
+          res.end(delta + completion)
+          return
+        }
+        const write = () => {
+          chunks++
+          res.write(delta)
+        }
+        write()
+        const timer = setInterval(write, 25)
+        res.once('close', () => clearInterval(timer))
+      },
+      ['a']
+    )
+    try {
+      await f.gateway.saveSettings({
+        ...f.store.get().settings,
+        timeoutSeconds: 5,
+        cooldownSeconds: 300
+      })
+      const account = f.store.get().accounts[0]
+      await f.gateway.saveAccount({
+        ...account,
+        modelProtocols: { 'kimi-for-coding': [upstreamProtocol] }
+      })
+      const body = { stream: true, input: 'hello', prompt_cache_key: 'timeout-session' }
+      const response = await f.post(body, {}, '/v1/responses')
+      assert.equal(response.status, 200)
+      await assert.rejects(response.text())
+      await eventually(() => f.gateway.snapshot().requests.length === 1)
+      const { runtime } = f.gateway.snapshot().accounts[0]
+      assert.equal(calls, 1)
+      assert.ok(chunks > 1)
+      assert.equal(runtime.active, 0)
+      assert.equal(runtime.failures, 0)
+      assert.equal(runtime.successes, 0)
+      assert.equal(runtime.cooldownUntil, 0)
+      const record = f.gateway.snapshot().requests[0]
+      assert.equal(record.status, 504)
+      assert.equal(record.interruption, 'timeout')
+      assert.equal(record.attempts, 1)
+      assert.equal(record.accountId, account.id)
+      assert.equal(
+        record.upstreamRoute,
+        upstreamProtocol === 'responses' ? '/v1/responses' : '/v1/chat/completions'
+      )
+      assert.notEqual(record.firstTokenMs, null)
+      const next = await f.post(body, {}, '/v1/responses')
+      assert.equal(next.status, 200)
+      assert.match(await next.text(), /response.completed/)
+      await eventually(() => f.gateway.snapshot().requests.length === 2)
+      assert.equal(calls, 2)
+      assert.equal(f.gateway.snapshot().requests[0].accountId, account.id)
+      assert.equal(f.gateway.snapshot().accounts[0].runtime.successes, 1)
+    } finally {
+      await f.cleanup()
+    }
+  })
+}
+
+test('上游返回 408 或 504 仍计为账号失败并冷却', async () => {
+  for (const status of [408, 504]) {
+    let calls = 0
+    const f = await gatewayFixture(
+      (_req, res) => {
+        calls++
+        res.writeHead(status, { 'content-type': 'application/json' })
+        res.end('{"error":{"message":"upstream timeout"}}')
+      },
+      ['a']
+    )
+    try {
+      await f.gateway.saveSettings({ ...f.store.get().settings, cooldownSeconds: 300 })
+      assert.equal((await f.post()).status, 503)
+      await eventually(() => f.gateway.snapshot().requests.length === 1)
+      const { runtime } = f.gateway.snapshot().accounts[0]
+      assert.equal(runtime.active, 0)
+      assert.equal(runtime.failures, 1)
+      assert.ok(runtime.cooldownUntil > Date.now())
+      assert.equal(f.gateway.snapshot().requests[0].attempts, 1)
+      assert.equal((await f.post()).status, 503)
+      assert.equal(calls, 1)
+    } finally {
+      await f.cleanup()
+    }
   }
 })
 
