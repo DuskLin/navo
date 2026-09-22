@@ -1,6 +1,6 @@
 import type { CatalogPrice, ModelPrice, Provider } from '../../shared/contracts'
 import { mergeRegistryCapabilities } from './registry-capabilities'
-import { autoMatchCatalog } from '../../shared/catalog-match'
+import { createCatalogMatcher } from '../../shared/catalog-match'
 import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
 
 type RegistryAccount = {
@@ -31,6 +31,7 @@ export function registryModels(
   entries: CatalogPrice[],
   prices: ModelPrice[]
 ) {
+  const match = createCatalogMatcher(entries)
   const catalog = new Map(
     entries.map((entry) => [JSON.stringify([entry.provider, entry.model]), entry])
   )
@@ -47,7 +48,7 @@ export function registryModels(
           )?.catalogMatch
           const entry = mapping
             ? catalog.get(JSON.stringify([mapping.provider, mapping.model]))
-            : autoMatchCatalog(entries, upstreamModel, provider)
+            : match(upstreamModel, provider)
           return entry
         })
       const matches = candidates.filter((entry) => entry !== undefined)

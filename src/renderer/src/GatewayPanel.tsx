@@ -1,3 +1,4 @@
+import { startVisiblePolling } from './visible-polling'
 import { RollingNumber } from './RollingNumber'
 import { autoMatchCatalog } from '../../shared/catalog-match'
 import { hasQuotaDisplay, hasQuotaWindow } from '../../shared/quota-display'
@@ -11,6 +12,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -63,11 +65,12 @@ import type {
 import { DEFAULT_ACCOUNT_CONCURRENCY, accountBaseUrl } from '../../shared/contracts'
 import {
   matchedModelPrice,
+  createModelPriceMatcher,
   resolveModelPrice,
   searchCatalogPrices
 } from '../../shared/model-pricing'
 import { useQuotaCardDrag } from './useQuotaCardDrag'
-import { requestCost, requestCostDetails } from '../../shared/request-cost'
+import { createRequestCostCalculator } from '../../shared/request-cost'
 import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
 import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
@@ -896,11 +899,17 @@ export function GatewayPanel({
   const [historyCursors, setHistoryCursors] = useState<(number | undefined)[]>([undefined])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const costCalculator = useMemo(
+    () =>
+      snapshot && page === 'settings' && settingsSection === 'accounts' && tab === 'activity'
+        ? createRequestCostCalculator(snapshot)
+        : undefined,
+    [snapshot, page, settingsSection, tab]
+  )
   const historyCursor = historyCursors.at(-1)
   useEffect(() => {
     if (page !== 'settings' || settingsSection !== 'accounts' || tab !== 'activity') return
     let active = true
-    let timer: ReturnType<typeof setTimeout>
     setHistoryLoading(true)
     const refresh = async () => {
       try {
@@ -914,12 +923,11 @@ export function GatewayPanel({
       } finally {
         if (active) setHistoryLoading(false)
       }
-      if (active && historyCursor === undefined) timer = setTimeout(() => void refresh(), 1500)
     }
-    void refresh()
+    const stopPolling = startVisiblePolling(refresh, historyCursor === undefined ? 1500 : 0)
     return () => {
       active = false
-      clearTimeout(timer)
+      stopPolling()
     }
   }, [page, settingsSection, tab, historyCursor])
   const [error, setError] = useState('')
@@ -950,7 +958,6 @@ export function GatewayPanel({
   }, [snapshot?.running, snapshot?.settings.port, connectionError, onStatusChange])
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout>
     async function refresh() {
       try {
         const data = await api.getGateway()
@@ -969,12 +976,11 @@ export function GatewayPanel({
           )
         }
       }
-      if (active) timer = setTimeout(() => void refresh(), 1500)
     }
-    void refresh()
+    const stopPolling = startVisiblePolling(refresh, 1500)
     return () => {
       active = false
-      clearTimeout(timer)
+      stopPolling()
     }
   }, [])
   useEffect(() => {
@@ -1748,7 +1754,7 @@ export function GatewayPanel({
                                   <RequestLatency record={r} />
                                 </td>
                                 <td>
-                                  <RequestCostCell record={r} snapshot={snapshot} />
+                                  <RequestCostCell record={r} calculate={costCalculator!} />
                                 </td>
                               </tr>
                             ))}
@@ -2968,7 +2974,7 @@ function ModelPricing({
     }
   }, [])
   const catalog = snapshot.modelPriceCatalog
-  const fallbackFor = (price: ModelPrice) => matchedModelPrice(price, catalog)
+  const fallbackFor = useMemo(() => createModelPriceMatcher(catalog), [catalog])
   const models = new Map<string, ModelPrice>()
   for (const account of snapshot.accounts) {
     const provider = account.provider ?? 'kimi'
@@ -3359,17 +3365,17 @@ function formatRequestMoney(value: number) {
 
 function RequestCostCell({
   record,
-  snapshot
+  calculate
 }: {
   record: RequestRecord
-  snapshot: GatewaySnapshot
+  calculate: ReturnType<typeof createRequestCostCalculator>
 }) {
-  const cost = requestCost(record, snapshot)
-  const details = requestCostDetails(record, snapshot)
+  const cost = calculate(record)
   const id = useId()
   const button = useRef<HTMLButtonElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number }>()
+  const details = position ? calculate.details(record) : []
   const show = () => {
     clearTimeout(timer.current)
     const bounds = button.current?.getBoundingClientRect()

@@ -14,6 +14,7 @@
     "tests/**/*.ts",
     "src/main/services/metadata-request.ts",
     "src/main/services/request-history-worker.ts",
+    "src/main/services/quota-statistics-worker.ts",
     "src/main/services/session-migration-worker.ts"
   ]
 }

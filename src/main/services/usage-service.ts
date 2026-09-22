@@ -8,6 +8,7 @@ export class UsageService {
   private worker?: Worker
   private closed = false
   private sequence = 0
+  private workerPricingVersion?: number
   private pending = new Map<
     number,
     {
@@ -25,6 +26,7 @@ export class UsageService {
       workerData: { file: this.file }
     })
     this.worker = worker
+    this.workerPricingVersion = undefined
     const fail = (error: Error) => {
       if (this.worker !== worker) return
       this.worker = undefined
@@ -49,9 +51,9 @@ export class UsageService {
     return worker
   }
 
-  usage(query: UsageQuery, pricing?: RequestPricing): Promise<UsageStats> {
+  usage(query: UsageQuery, pricing?: RequestPricing, pricingVersion?: number): Promise<UsageStats> {
     if (this.closed) return Promise.reject(new Error('统计服务已关闭'))
-    const key = JSON.stringify([query, pricing])
+    const key = JSON.stringify([query, pricingVersion === undefined ? pricing : { pricingVersion }])
     const existing = this.inFlight.get(key)
     if (existing) return existing
     if (this.pending.size >= 16) return Promise.reject(new Error('统计查询繁忙，请稍后重试'))
@@ -61,7 +63,15 @@ export class UsageService {
       this.pending.set(id, { resolve, reject })
       worker.ref()
       try {
-        worker.postMessage({ id, query, pricing })
+        worker.postMessage({
+          id,
+          query,
+          pricingVersion,
+          ...(pricingVersion !== undefined && this.workerPricingVersion === pricingVersion
+            ? {}
+            : { pricing })
+        })
+        if (pricingVersion !== undefined) this.workerPricingVersion = pricingVersion
       } catch (error) {
         this.pending.delete(id)
         if (!this.pending.size) worker.unref()

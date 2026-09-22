@@ -23,6 +23,7 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  onWindowVisibilityChange(listener: (visible: boolean) => void): () => void
   onMigrationProgress(
     listener: (progress: import('./session-migration').MigrationProgress) => void
   ): () => void
@@ -331,6 +332,10 @@ export interface ModelPriceCatalogSnapshot {
   updatedAt: number | null
   error: string
 }
+export type GatewayUpdate = Omit<GatewaySnapshot, 'modelPriceCatalog'> & {
+  catalogVersion: number
+  modelPriceCatalog?: ModelPriceCatalogSnapshot
+}
 export interface GatewaySnapshot {
   liveFlows?: import('./live-flow').LiveFlow[]
   lanBaseUrls: string[]
@@ -354,6 +359,7 @@ export interface RequestHistoryPage {
 }
 
 export const IPC = {
+  windowVisibility: 'window:visibility',
   migrationChooseDirectory: 'migration:choose-directory',
   migrationProgress: 'migration:progress',
   zcodeScan: 'zcode:scan',

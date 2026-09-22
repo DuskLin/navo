@@ -1,5 +1,5 @@
-import type { GatewaySnapshot, QuotaWindow, RequestRecord } from './contracts'
-import { requestCost } from './request-cost'
+import type { QuotaWindow, RequestRecord } from './contracts'
+import { createRequestCostCalculator, type RequestPricing } from './request-cost'
 
 export interface QuotaCycleQuery {
   accountId: string
@@ -62,8 +62,9 @@ export function estimateQuotaCost(
   durationMs: number,
   checkedAt: number,
   records: RequestRecord[],
-  pricing: Pick<GatewaySnapshot, 'accounts' | 'modelPrices' | 'modelPriceCatalog'>,
-  now = Date.now()
+  pricing: RequestPricing,
+  now = Date.now(),
+  calculate = createRequestCostCalculator(pricing)
 ): QuotaCostEstimate {
   const unavailable = (reason: string): QuotaCostEstimate => ({ amounts: [], reason })
   if (!window) return unavailable('暂无额度数据')
@@ -90,7 +91,7 @@ export function estimateQuotaCost(
   for (const record of records) {
     // Exclude requests crossing either observation boundary: their cost cannot be aligned reliably.
     if (record.time < start || record.time + record.durationMs > checkedAt) continue
-    for (const amount of requestCost(record, pricing).amounts)
+    for (const amount of calculate(record).amounts)
       amounts.set(amount.currency, (amounts.get(amount.currency) ?? 0) + amount.value)
   }
   if (![...amounts.values()].some((value) => value > 0))

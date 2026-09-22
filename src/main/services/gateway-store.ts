@@ -425,6 +425,7 @@ export class GatewayStore {
           accounts.some((a) => a.id === id)
         )
       }
+      this.revision++
     } catch {
       throw new Error('账号配置损坏或系统钥匙串不可用。原文件已保留，请恢复钥匙串或备份后重启。')
     }
@@ -432,6 +433,7 @@ export class GatewayStore {
   get(): GatewayData {
     return structuredClone(this.data)
   }
+  revision = 0
   get priceCachePath(): string {
     return `${this.file}.model-prices.json`
   }
@@ -449,6 +451,7 @@ export class GatewayStore {
       })
       await rename(`${this.file}.tmp`, this.file)
       this.data = next
+      this.revision++
     })
     this.writes = write.catch(() => {})
     return write

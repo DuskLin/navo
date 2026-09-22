@@ -1,5 +1,5 @@
 import type { CatalogPrice, ModelPrice, ModelPriceCatalogSnapshot } from './contracts'
-import { autoMatchCatalog, hasCatalogPrice } from './catalog-match'
+import { autoMatchCatalog, createCatalogMatcher, hasCatalogPrice } from './catalog-match'
 
 export const PRICE_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
 export type PriceField = (typeof PRICE_FIELDS)[number]
@@ -33,6 +33,18 @@ export function matchedModelPrice(
     autoMatchCatalog(catalog?.entries ?? [], price.model, price.provider) ??
     catalog?.prices.find((p) => p.provider === price.provider && p.model === price.model)
   )
+}
+
+/** 一次批量计算共用目录索引；手动关联不存在时仍保持未匹配。 */
+export function createModelPriceMatcher(catalog: ModelPriceCatalogSnapshot | undefined) {
+  const match = createCatalogMatcher(catalog?.entries ?? [])
+  const key = (provider: string, model: string) => JSON.stringify([provider, model])
+  const entries = new Map(catalog?.entries?.map((p) => [key(p.provider, p.model), p]))
+  const prices = new Map(catalog?.prices.map((p) => [key(p.provider, p.model), p]))
+  return (price: ModelPrice) =>
+    price.catalogMatch
+      ? entries.get(key(price.catalogMatch.provider, price.catalogMatch.model))
+      : (match(price.model, price.provider) ?? prices.get(key(price.provider, price.model)))
 }
 
 export function searchCatalogPrices(entries: CatalogPrice[], query: string): CatalogPrice[] {
