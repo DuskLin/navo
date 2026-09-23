@@ -20,6 +20,7 @@ import {
   type ReactNode
 } from 'react'
 import { SettingsToggle } from './SettingsToggle'
+import { LaunchAtLoginSettings } from './LaunchAtLoginSettings'
 import { DashboardSettings } from './DashboardSettings'
 import { KimiDesktopSettings } from './KimiDesktopSettings'
 import { createPortal } from 'react-dom'
@@ -1794,7 +1795,8 @@ export function GatewayPanel({
               className="settings-pane"
             >
               <h2>网关设置</h2>
-              <p className="settings-description">配置连接方式与请求策略，保存后生效。</p>
+              <p className="settings-description">配置应用启动、网关连接方式与请求策略。</p>
+              <LaunchAtLoginSettings active={settingsSection === 'gateway'} />
               <SettingsEditor
                 input={snapshot.settings}
                 running={snapshot.running}

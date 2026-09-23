@@ -2791,6 +2791,11 @@ input.account-policy-switch[role='switch']:checked::after,
   padding-top: 24px;
   border-top: 1px solid var(--border);
 }
+.settings-pane > .settings-group + form {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
 .settings-group h3,
 .settings-content .dashboard-section h3 {
   margin: 0 0 16px;

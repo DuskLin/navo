@@ -23,6 +23,11 @@ await writeFile(
     globalThis.tooltip = text;
     return setToolTip.call(this, text);
   };
+  const setContextMenu = Tray.prototype.setContextMenu;
+  Tray.prototype.setContextMenu = function(menu) {
+    globalThis.trayMenu = menu;
+    return setContextMenu.call(this, menu);
+  };
   globalThis.fetch = async () => { throw new Error('Offline test'); };
   require('electron').net.fetch = globalThis.fetch;
   require(${JSON.stringify(resolve('out/main/index.js'))});
@@ -47,6 +52,22 @@ try {
   application = await electron.launch({ args: [entry], env })
   const page = await application.firstWindow()
   await page.waitForFunction(() => !!window.navo)
+  assert.deepEqual(
+    await application.evaluate(() => {
+      const item = globalThis.trayMenu?.getMenuItemById('launch-at-login')
+      return item && { label: item.label, checked: item.checked, enabled: item.enabled }
+    }),
+    { label: '开机自启 Navo', checked: false, enabled: false }
+  )
+  assert.equal(
+    await application.evaluate(() => {
+      const item = globalThis.trayMenu.getMenuItemById('launch-at-login')
+      item.checked = true
+      globalThis.trayMenu.emit('menu-will-show')
+      return item.checked
+    }),
+    false
+  )
   await page.evaluate(async (port) => {
     const snapshot = await window.navo.getGateway()
     await window.navo.saveGateway({ ...snapshot.settings, port })
@@ -83,7 +104,7 @@ try {
   await mkdir('artifacts', { recursive: true })
   await writeFile('artifacts/tray-idle.png', Buffer.from(idle, 'base64'))
   await writeFile('artifacts/tray-active.png', Buffer.from(active, 'base64'))
-  console.log('通过：真实请求触发蓝色流转、并发请求持续动画、断开后恢复白色并停止定时刷新。')
+  console.log('通过：托盘开机自启菜单状态刷新、请求动画与空闲后停止定时刷新。')
 } finally {
   requests.forEach((request) => request.destroy())
   if (application) await application.close()

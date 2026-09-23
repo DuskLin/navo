@@ -7,6 +7,12 @@ export interface AppSettings {
   sleepReleaseDelaySeconds: number
 }
 
+export interface LaunchAtLoginState {
+  supported: boolean
+  enabled: boolean
+  requiresApproval: boolean
+}
+
 export interface SleepProtectionState {
   onBatteryPower?: boolean
   mode: 'system' | 'idle'
@@ -58,6 +64,8 @@ export interface HelperApi {
   getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
+  getLaunchAtLogin(): Promise<LaunchAtLoginState>
+  setLaunchAtLogin(enabled: boolean): Promise<LaunchAtLoginState>
   getSleepProtection(): Promise<SleepProtectionState>
   saveSettings(settings: Partial<AppSettings>): Promise<AppSettings>
   getGateway(): Promise<GatewaySnapshot>
@@ -382,6 +390,8 @@ export const IPC = {
   appOpenIssues: 'app:open-issues',
   appOpenProject: 'app:open-project',
   settingsGet: 'settings:get',
+  launchAtLoginGet: 'launch-at-login:get',
+  launchAtLoginSet: 'launch-at-login:set',
   sleepProtectionGet: 'sleep-protection:get',
   settingsSave: 'settings:save',
   gatewayGet: 'gateway:get',

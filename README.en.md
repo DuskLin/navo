@@ -168,6 +168,8 @@ The dashboard has its own read-only server and access code, separate from the in
 
 The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Navo” (Quit Navo) to stop the gateway and exit; macOS also supports ⌘Q.
 
+Installed builds can toggle **开机自启 Navo** (Launch Navo at login) directly from the menu bar / tray menu, or under **Settings → Gateway settings → App startup**. To start the gateway as well, enable **打开应用时自动启动网关** (Start gateway when opening the app) and save the gateway settings. macOS may require approval in System Settings. On Linux, keep the AppImage at a stable path. Development builds do not change login items.
+
 ### Phone dashboard
 
 Portrait mode uses a single column and bottom navigation. Open an account to inspect its quota windows, reset times, and usage trend. Landscape mode switches to two columns and top navigation. Account names come directly from your settings.
