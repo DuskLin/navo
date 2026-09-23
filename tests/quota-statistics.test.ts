@@ -143,6 +143,97 @@ test('请求追加、价格修改、排除周期和到期均使对应额度统�
   }
 })
 
+test('订阅续期回满但轮换时间不变：清除旧展示，重启后仅计算续期后的用量', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-renewal-'))
+  const file = join(dir, 'history.sqlite')
+  let history = new RequestHistory(file)
+  let service = new QuotaStatistics(file, history, () => '1')
+  const a = structuredClone(account())
+  const refresh = async () => {
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+  }
+  try {
+    history.append(record)
+    await refresh()
+    const before = structuredClone(a.quotaEstimates!)
+    const renewedAt = now + 1000
+    a.capabilities!.checkedAt = renewedAt
+    for (const window of ['fiveHour', 'weekly'] as const)
+      a.capabilities!.quota![window] = { ...quota, remaining: 100, used: 0 }
+    service.apply([a], pricing, 1)
+    for (const window of ['fiveHour', 'weekly'] as const) {
+      assert.deepEqual(a.quotaEstimates![window]!.amounts, [], '不能暂时沿用续期前金额')
+      assert.equal(a.quotaEstimates![window]!.cacheHitRate, null)
+    }
+    await refresh()
+    for (const window of ['fiveHour', 'weekly'] as const) {
+      assert.equal(a.quotaEstimates![window]!.reason, '待产生用量')
+      assert.deepEqual(a.quotaEstimates![window]!.averages, before[window]!.averages)
+      assert.equal(a.capabilities!.quota![window]!.resetAt, quota.resetAt)
+    }
+    await service.close()
+    history.close()
+    history = new RequestHistory(file)
+    service = new QuotaStatistics(file, history, () => '1')
+    const after = {
+      ...record,
+      id: 'after-renewal',
+      time: renewedAt + 100,
+      usage: { ...record.usage!, cacheRead: 0 }
+    }
+    history.append(after)
+    history.append({ ...record, id: 'cross-renewal', time: renewedAt - 50 })
+    a.capabilities!.checkedAt = renewedAt + 1000
+    for (const window of ['fiveHour', 'weekly'] as const)
+      a.capabilities!.quota![window] = { ...quota, remaining: 75, used: 25 }
+    await refresh()
+    for (const window of ['fiveHour', 'weekly'] as const) {
+      const expected = estimateQuotaCost(
+        a.capabilities!.quota![window],
+        window === 'weekly' ? 7 * 86400000 : 5 * 3600000,
+        a.capabilities!.checkedAt,
+        [after],
+        pricing,
+        now
+      )
+      assert.deepEqual(a.quotaEstimates![window]!.amounts, expected.amounts)
+      assert.equal(a.quotaEstimates![window]!.cacheHitRate, 0)
+      assert.equal(a.quotaEstimates![window]!.averages![0].total, expected.amounts[0].total)
+      assert.equal(history.getQuotaCycles({ accountId: a.id, window }).length, 1)
+    }
+  } finally {
+    await service.close()
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('后台旧任务尚未完成时额度回升，不能写入续期前的结果', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-renewal-race-'))
+  const file = join(dir, 'history.sqlite')
+  const history = new RequestHistory(file)
+  const service = new QuotaStatistics(file, history, () => '1')
+  try {
+    history.append(record)
+    const a = structuredClone(account())
+    service.apply([a], pricing, 1)
+    a.capabilities!.checkedAt = now + 1000
+    a.capabilities!.quota!.weekly = { ...quota, remaining: 87.5, used: 12.5 }
+    service.apply([a], pricing, 1)
+    await service.whenIdle()
+    service.apply([a], pricing, 1)
+    assert.deepEqual(a.quotaEstimates!.weekly!.amounts, [])
+    assert.deepEqual(history.getQuotaCycles({ accountId: 'a', window: 'weekly' }), [])
+    assert.ok(a.quotaEstimates!.fiveHour!.amounts.length, '未刷新的窗口不受影响')
+  } finally {
+    await service.close()
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('同周期后台刷新期间保留整组数字，新结果就绪后一起替换', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'navo-quota-no-flicker-'))
   const file = join(dir, 'history.sqlite')
