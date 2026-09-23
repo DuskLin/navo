@@ -104,6 +104,46 @@ test('weekly uses seven days and keeps currencies separate without conversion', 
   )
 })
 
+test('续期后按观测基线的额度差值估算，排除续期前及跨边界请求', () => {
+  const baseline = { start: 7 * hour, usedRatio: 0.125 }
+  const records = [
+    record,
+    { ...record, time: baseline.start - 500 },
+    { ...record, time: baseline.start, usage: { ...record.usage!, cacheRead: 3 } },
+    { ...record, time: 8 * hour - 500 }
+  ]
+  const result = estimateQuotaCost(
+    window,
+    5 * hour,
+    8 * hour,
+    records,
+    pricing,
+    8 * hour,
+    undefined,
+    baseline
+  )
+  assert.deepEqual(result.amounts, [{ currency: 'USD', used: 10, total: 80, remaining: 60 }])
+  assert.equal(quotaCacheHitRate(window, 5 * hour, 8 * hour, records, 8 * hour, baseline), 0.75)
+  assert.deepEqual(
+    estimateQuotaCost(
+      { ...window, remaining: 87.5 },
+      5 * hour,
+      8 * hour,
+      records,
+      pricing,
+      8 * hour,
+      undefined,
+      baseline
+    ),
+    { amounts: [], reason: '待产生用量' }
+  )
+  assert.equal(
+    estimateQuotaCost(window, 5 * hour, 6 * hour, records, pricing, 8 * hour, undefined, baseline)
+      .reason,
+    '等待额度刷新'
+  )
+})
+
 test('quota cache hit rates are token-weighted, independent of price and include cache writes', () => {
   const request = (input: number, cacheRead: number, cacheWrite = 0) => ({
     ...record,

@@ -7,6 +7,68 @@ import { join } from 'node:path'
 import { performanceHistoryRange } from '../src/shared/usage'
 import { RequestHistory } from '../src/main/services/request-history'
 
+test('额度观测跨重启识别回升，隔离账号及窗口，忽略旧快照并在自然轮换时恢复', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'navo-quota-observation-'))
+  const file = join(dir, 'requests.sqlite')
+  let history = new RequestHistory(file)
+  const now = Date.now()
+  const quota = {
+    limit: 100,
+    remaining: 50,
+    used: 50,
+    resetAt: new Date(now + 3600000).toISOString()
+  }
+  try {
+    assert.equal(history.observeQuota('a', 'weekly', quota, now), undefined)
+    history.close()
+    history = new RequestHistory(file)
+    const renewed = { ...quota, remaining: 87.5, used: 12.5 }
+    const baseline = { start: now + 1000, usedRatio: 0.125 }
+    assert.deepEqual(history.observeQuota('a', 'weekly', renewed, now + 1000), baseline)
+    assert.deepEqual(history.observeQuota('a', 'weekly', quota, now), baseline)
+    assert.deepEqual(
+      history.observeQuota('a', 'weekly', { ...quota, remaining: 75 }, now + 2000),
+      baseline
+    )
+    assert.equal(history.observeQuota('a', 'fiveHour', renewed, now + 1000), undefined)
+    assert.equal(history.observeQuota('b', 'weekly', renewed, now + 1000), undefined)
+    assert.equal(
+      history.observeQuota('a', 'weekly', { ...quota, remaining: NaN }, now + 3000),
+      undefined
+    )
+    assert.deepEqual(
+      history.observeQuota('a', 'weekly', { ...quota, remaining: 60 }, now + 4000),
+      baseline
+    )
+    assert.equal(
+      history.observeQuota(
+        'a',
+        'weekly',
+        { ...quota, resetAt: new Date(now + 7 * 86400000 + 3600000).toISOString() },
+        now + 3600000
+      ),
+      undefined
+    )
+    assert.deepEqual(
+      history.observeQuota('new', 'weekly', { ...quota, remaining: 100, used: 0 }, now),
+      { start: now, usedRatio: 0 }
+    )
+    assert.deepEqual(
+      history.observeQuota('new', 'weekly', { ...quota, remaining: 100, used: 0 }, now + 1000),
+      { start: now + 1000, usedRatio: 0 }
+    )
+    history.close()
+    history = new RequestHistory(file)
+    assert.deepEqual(history.observeQuota('new', 'weekly', quota, now + 2000), {
+      start: now + 1000,
+      usedRatio: 0
+    })
+  } finally {
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('quota usage reads complete account history within cycle boundaries and invalidates cache', async (t) => {
   t.mock.method(Date, 'now', () => Date.parse('2026-09-20T00:00:00Z'))
   const dir = await mkdtemp(join(tmpdir(), 'kimi-quota-history-'))

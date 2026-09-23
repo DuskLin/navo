@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads'
 import { join } from 'node:path'
 import type { AccountView, QuotaWindow } from '../../shared/contracts'
 import type { RequestPricing } from '../../shared/request-cost'
-import type { QuotaCostEstimate } from '../../shared/quota-cost'
+import type { QuotaCostEstimate, QuotaUsageBaseline } from '../../shared/quota-cost'
 import type { RequestHistory } from './request-history'
 
 export interface QuotaStatisticsTask {
@@ -13,6 +13,7 @@ export interface QuotaStatisticsTask {
   window: 'fiveHour' | 'weekly'
   quota: QuotaWindow | null | undefined
   checkedAt: number
+  baseline?: QuotaUsageBaseline
 }
 type Result = QuotaStatisticsTask & { estimate: QuotaCostEstimate }
 type Job = {
@@ -23,7 +24,7 @@ type Job = {
   now: number
 }
 
-/** 快照只读缓存；始终最多一个运行任务和一个最新待处理任务。 */
+/** 持久化额度观测，后台缓存估算；始终最多一个运行任务和一个最新待处理任务。 */
 export class QuotaStatistics {
   private worker?: Worker
   private workerPricingVersion = -1
@@ -59,12 +60,14 @@ export class QuotaStatistics {
       for (const window of ['fiveHour', 'weekly'] as const) {
         const quota = caps.quota[window]
         const reset = Date.parse(quota?.resetAt ?? '')
+        const baseline = this.history.observeQuota(account.id, window, quota, caps.checkedAt)
         const key = JSON.stringify([account.id, window])
         const fingerprint = JSON.stringify([
           pricingVersion,
           this.history.quotaRevision(account.id),
           caps.checkedAt,
           quota,
+          baseline,
           reset <= now
         ])
         const task = {
@@ -74,7 +77,8 @@ export class QuotaStatistics {
           historyRevision: this.history.quotaRevision(account.id),
           window,
           quota,
-          checkedAt: caps.checkedAt
+          checkedAt: caps.checkedAt,
+          baseline
         }
         this.wanted.set(key, fingerprint)
         const cached = this.cache.get(key)
@@ -87,6 +91,7 @@ export class QuotaStatistics {
             cached &&
             Number.isFinite(reset) &&
             reset > now &&
+            cached.baseline?.start === baseline?.start &&
             Date.parse(cached.quota?.resetAt ?? '') === reset
               ? { ...structuredClone(cached.estimate), refreshing: true }
               : {
@@ -94,7 +99,7 @@ export class QuotaStatistics {
                   reason: now < this.retryAt ? '额度估算暂不可用，稍后重试' : '额度估算更新中',
                   cacheHitRate: null
                 }
-          tasks.push(task)
+          tasks.push(structuredClone(task))
         }
       }
     }

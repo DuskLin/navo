@@ -1,11 +1,23 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { RequestHistoryPage, RequestRecord } from '../../shared/contracts'
+import type { QuotaWindow, RequestHistoryPage, RequestRecord } from '../../shared/contracts'
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
 import { createRequestCostCalculator, type RequestPricing } from '../../shared/request-cost'
 import { localDayKey, summarizeActivity } from '../../shared/usage'
-import type { QuotaCostCycle, QuotaCostEstimate, QuotaCycleQuery } from '../../shared/quota-cost'
+import type {
+  QuotaCostCycle,
+  QuotaCostEstimate,
+  QuotaCycleQuery,
+  QuotaUsageBaseline
+} from '../../shared/quota-cost'
+
+interface QuotaObservation {
+  resetAt: string
+  checkedAt: number
+  usedRatio: number
+  baseline?: QuotaUsageBaseline
+}
 
 function cycleQuery(value: unknown): QuotaCycleQuery {
   if (!value || typeof value !== 'object') throw new Error('周期查询无效')
@@ -31,6 +43,7 @@ export class RequestHistory {
   private cleanupTimer?: ReturnType<typeof setInterval>
   private db: DatabaseSync
   private quotaRecords = new Map<string, { start: number; end: number; records: RequestRecord[] }>()
+  private quotaObservations = new Map<string, QuotaObservation | undefined>()
   constructor(
     file: string,
     private readonly readOnly = false
@@ -45,6 +58,12 @@ export class RequestHistory {
     this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
+      CREATE TABLE IF NOT EXISTS quota_observations (
+        account_id TEXT NOT NULL,
+        window TEXT NOT NULL,
+        observation TEXT NOT NULL,
+        PRIMARY KEY (account_id, window)
+      );
       CREATE TABLE IF NOT EXISTS quota_cost_cycles (
         account_id TEXT NOT NULL,
         window TEXT NOT NULL,
@@ -102,6 +121,57 @@ export class RequestHistory {
   }
   quotaRevision(accountId: string): string {
     return `${this.quotaEpoch}:${this.accountRevisions.get(accountId) ?? 0}`
+  }
+  observeQuota(
+    accountId: string,
+    window: 'fiveHour' | 'weekly',
+    quota: QuotaWindow | null | undefined,
+    checkedAt: number
+  ): QuotaUsageBaseline | undefined {
+    const reset = Date.parse(quota?.resetAt ?? '')
+    const duration = window === 'weekly' ? 7 * 86400000 : 5 * 3600000
+    if (
+      !Number.isFinite(reset) ||
+      !Number.isFinite(checkedAt) ||
+      checkedAt < reset - duration ||
+      checkedAt >= reset ||
+      quota?.limit == null ||
+      !Number.isFinite(quota.limit) ||
+      quota.limit <= 0 ||
+      quota.remaining == null ||
+      !Number.isFinite(quota.remaining) ||
+      quota.remaining < 0 ||
+      quota.remaining > quota.limit
+    )
+      return undefined
+    const key = JSON.stringify([accountId, window])
+    if (!this.quotaObservations.has(key)) {
+      const row = this.db
+        .prepare('SELECT observation FROM quota_observations WHERE account_id = ? AND window = ?')
+        .get(accountId, window)
+      this.quotaObservations.set(key, row ? JSON.parse(String(row.observation)) : undefined)
+    }
+    const previous = this.quotaObservations.get(key)
+    const resetAt = new Date(reset).toISOString()
+    if (previous && checkedAt <= previous.checkedAt)
+      return previous.resetAt === resetAt ? previous.baseline : undefined
+    const usedRatio = 1 - quota.remaining / quota.limit
+    const sameCycle = previous?.resetAt === resetAt
+    let baseline = sameCycle ? previous.baseline : undefined
+    // 满额观测也能为升级/首次启动建立边界；未采到满额时用回升后的比例作基线。
+    if (usedRatio === 0 || (sameCycle && usedRatio < previous.usedRatio))
+      baseline = { start: checkedAt, usedRatio }
+    const observation: QuotaObservation = { resetAt, checkedAt, usedRatio, baseline }
+    this.db
+      .prepare(
+        `
+      INSERT INTO quota_observations (account_id, window, observation) VALUES (?, ?, ?)
+      ON CONFLICT(account_id, window) DO UPDATE SET observation = excluded.observation
+    `
+      )
+      .run(accountId, window, JSON.stringify(observation))
+    this.quotaObservations.set(key, observation)
+    return baseline
   }
   quotaUsage(accountId: string, start: number, end: number): RequestRecord[] {
     if (this.readOnly) {

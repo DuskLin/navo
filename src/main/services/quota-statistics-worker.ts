@@ -31,7 +31,11 @@ parentPort!.on(
           const reset = Date.parse(task.quota?.resetAt ?? '')
           const records =
             Number.isFinite(reset) && reset > now
-              ? history.quotaUsage(task.accountId, reset - duration, task.checkedAt)
+              ? history.quotaUsage(
+                  task.accountId,
+                  Math.max(reset - duration, task.baseline?.start ?? -Infinity),
+                  task.checkedAt
+                )
               : []
           const estimate = estimateQuotaCost(
             task.quota,
@@ -40,14 +44,16 @@ parentPort!.on(
             records,
             pricing,
             now,
-            calculate
+            calculate,
+            task.baseline
           )
           estimate.cacheHitRate = quotaCacheHitRate(
             task.quota,
             duration,
             task.checkedAt,
             records,
-            now
+            now,
+            task.baseline
           )
           return { ...task, estimate }
         })

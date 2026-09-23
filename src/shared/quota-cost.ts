@@ -25,16 +25,23 @@ export interface QuotaCostEstimate {
   amounts: { currency: 'USD' | 'CNY'; used: number; total: number; remaining: number }[]
 }
 
+/** 同一轮换周期内额度回升后的观测基线，轮换结束时间仍由上游决定。 */
+export interface QuotaUsageBaseline {
+  start: number
+  usedRatio: number
+}
+
 /** Token-weighted cache hits for the same observed quota cycle, independent of monetary pricing. */
 export function quotaCacheHitRate(
   window: QuotaWindow | null | undefined,
   durationMs: number,
   checkedAt: number,
   records: RequestRecord[],
-  now = Date.now()
+  now = Date.now(),
+  baseline?: QuotaUsageBaseline
 ): number | null {
   const reset = Date.parse(window?.resetAt ?? '')
-  const start = reset - durationMs
+  const start = Math.max(reset - durationMs, baseline?.start ?? -Infinity)
   if (
     !Number.isFinite(reset) ||
     reset <= now ||
@@ -66,14 +73,15 @@ export function estimateQuotaCost(
   records: RequestRecord[],
   pricing: RequestPricing,
   now = Date.now(),
-  calculate = createRequestCostCalculator(pricing)
+  calculate = createRequestCostCalculator(pricing),
+  baseline?: QuotaUsageBaseline
 ): QuotaCostEstimate {
   const unavailable = (reason: string): QuotaCostEstimate => ({ amounts: [], reason })
   if (!window) return unavailable('暂无额度数据')
   const reset = Date.parse(window.resetAt ?? '')
   if (!Number.isFinite(reset)) return unavailable('缺少周期时间')
   if (reset <= now) return unavailable('等待额度刷新')
-  const start = reset - durationMs
+  const start = Math.max(reset - durationMs, baseline?.start ?? -Infinity)
   if (!Number.isFinite(checkedAt) || checkedAt < start || checkedAt >= reset)
     return unavailable('等待额度刷新')
   const { limit, remaining } = window
@@ -87,8 +95,9 @@ export function estimateQuotaCost(
     remaining > limit
   )
     return unavailable('额度比例无效')
-  const usedRatio = 1 - remaining / limit
-  if (usedRatio === 0) return unavailable('待产生用量')
+  // 刷新被观测到时可能已经有新消耗，只用基线之后的额度差值对齐请求金额。
+  const usedRatio = 1 - remaining / limit - (baseline?.usedRatio ?? 0)
+  if (usedRatio <= 0) return unavailable('待产生用量')
   const amounts = new Map<'USD' | 'CNY', number>()
   for (const record of records) {
     // Exclude requests crossing either observation boundary: their cost cannot be aligned reliably.
