@@ -386,6 +386,10 @@ try {
   assert.equal(await page.getByRole('dialog').count(), 0)
   await page.getByLabel('模型表现', { exact: true }).uncheck()
   await page.getByRole('button', { name: '网关设置', exact: true }).click()
+  const launchAtLogin = page.getByRole('switch', { name: '开机自启 Navo', exact: true })
+  await launchAtLogin.waitFor()
+  assert.equal(await launchAtLogin.isDisabled(), true)
+  assert.equal((await page.evaluate(() => window.navo.getLaunchAtLogin())).supported, false)
   assert.equal(
     await page
       .locator('section[aria-label="网关设置"] fieldset')

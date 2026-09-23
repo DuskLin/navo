@@ -1,4 +1,5 @@
-import { app, Menu, nativeImage, Tray } from 'electron'
+import { app, dialog, Menu, nativeImage, Tray } from 'electron'
+import type { LaunchAtLogin } from './services/launch-at-login'
 import appLogo from '../renderer/src/assets/navo-logo.png?asset'
 
 function trayIcon(source: Electron.NativeImage, phase?: number): Electron.NativeImage {
@@ -31,7 +32,8 @@ function trayIcon(source: Electron.NativeImage, phase?: number): Electron.Native
 
 export function createTray(
   showWindow: () => void,
-  subscribe: (listener: (count: number) => void) => () => void
+  subscribe: (listener: (count: number) => void) => () => void,
+  launchAtLogin: Pick<LaunchAtLogin, 'get' | 'set'>
 ): Tray {
   const source = nativeImage.createFromPath(appLogo)
   if (source.isEmpty()) throw new Error('无法加载应用 Logo')
@@ -43,9 +45,7 @@ export function createTray(
   let frame = 0
   const unsubscribe = subscribe((count) => {
     if (tray.isDestroyed()) return
-    tray.setToolTip(
-      count > 0 ? `Navo · 正在处理 ${count} 个请求` : 'Navo · 空闲'
-    )
+    tray.setToolTip(count > 0 ? `Navo · 正在处理 ${count} 个请求` : 'Navo · 空闲')
     if (count > 0 && !timer) {
       frame = 0
       tray.setImage(frames[frame])
@@ -69,14 +69,71 @@ export function createTray(
     unsubscribe()
     clearInterval(timer)
   })
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '显示主窗口', click: showWindow },
-      { label: '关闭窗口后，网关继续在后台运行', enabled: false },
-      { type: 'separator' },
-      { label: '退出 Navo', click: () => app.quit() }
-    ])
-  )
+  let changingLoginItem = false
+  const menu = Menu.buildFromTemplate([
+    { label: '显示主窗口', click: showWindow },
+    { label: '关闭窗口后，网关继续在后台运行', enabled: false },
+    { type: 'separator' },
+    {
+      id: 'launch-at-login',
+      label: '开机自启 Navo',
+      type: 'checkbox',
+      enabled: false,
+      click: (item) => {
+        const enabled = item.checked
+        changingLoginItem = true
+        item.enabled = false
+        void launchAtLogin
+          .set(enabled)
+          .then((state) => {
+            refreshLoginItem()
+            if (state.enabled !== enabled && !state.requiresApproval) {
+              throw new Error('系统未能应用开机自启设置，请检查系统登录项')
+            }
+            if (enabled && state.requiresApproval) {
+              void dialog
+                .showMessageBox({
+                  type: 'info',
+                  title: '需要允许开机自启',
+                  message: '请在 macOS「系统设置 → 通用 → 登录项与扩展」中允许 Navo。',
+                  buttons: ['知道了']
+                })
+                .catch((error) => console.warn('无法显示开机自启授权提示：', error))
+            }
+          })
+          .catch((error) => {
+            dialog.showErrorBox(
+              '开机自启设置失败',
+              error instanceof Error ? error.message : '请稍后重试'
+            )
+          })
+          .finally(() => {
+            changingLoginItem = false
+            refreshLoginItem()
+          })
+      }
+    },
+    { type: 'separator' },
+    { label: '退出 Navo', click: () => app.quit() }
+  ])
+  const loginItem = menu.getMenuItemById('launch-at-login')!
+  function refreshLoginItem(): void {
+    if (tray.isDestroyed()) return
+    try {
+      const state = launchAtLogin.get()
+      loginItem.checked = state.enabled
+      loginItem.enabled = state.supported && !changingLoginItem
+      loginItem.label = state.requiresApproval ? '开机自启 Navo（待系统允许）' : '开机自启 Navo'
+    } catch {
+      loginItem.enabled = false
+      loginItem.label = '开机自启 Navo（状态不可用）'
+    }
+  }
+  menu.on('menu-will-show', refreshLoginItem)
+  refreshLoginItem()
+  tray.setContextMenu(menu)
+  if (process.platform === 'darwin') tray.on('mouse-down', refreshLoginItem)
+  if (process.platform === 'win32') tray.on('right-click', refreshLoginItem)
   // macOS single click opens the menu; Windows/Linux can also restore directly.
   if (process.platform !== 'darwin') tray.on('click', showWindow)
   tray.on('double-click', showWindow)

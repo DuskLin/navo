@@ -18,6 +18,7 @@ import { isAbsolute, join } from 'node:path'
 import { isTrustedRendererUrl } from './services/renderer-trust'
 import { IPC } from '../shared/contracts'
 import { SettingsStore, validateSettings } from './services/settings'
+import { LaunchAtLogin } from './services/launch-at-login'
 import { RequestSleepBlocker } from './services/request-sleep-blocker'
 import { MacSleepProtection } from './services/mac-sleep'
 import { GatewayStore, string } from './services/gateway-store'
@@ -288,6 +289,9 @@ void app
       electron: process.versions.electron
     }))
     handle(IPC.settingsGet, () => settings.get())
+    const launchAtLogin = new LaunchAtLogin(app)
+    handle(IPC.launchAtLoginGet, () => launchAtLogin.get())
+    handle(IPC.launchAtLoginSet, (enabled) => launchAtLogin.set(enabled as boolean))
     handle(IPC.sleepProtectionGet, () => ({
       ...(macSleepProtection?.snapshot() ?? {
         mode: 'idle',
@@ -487,7 +491,11 @@ void app
         { role: 'windowMenu' }
       ])
     )
-    tray = createTray(showWindow, (listener) => service.onActiveRequestsChange(listener))
+    tray = createTray(
+      showWindow,
+      (listener) => service.onActiveRequestsChange(listener),
+      launchAtLogin
+    )
     createWindow()
     if (macSleepProtection && settings.get().preventSleepDuringRequests) {
       void macSleepProtection
