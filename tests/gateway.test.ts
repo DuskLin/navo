@@ -2597,6 +2597,7 @@ test('harness endpoints identify every supported client and preserve protocol pa
       await response.text()
       await eventually(() => f.gateway.snapshot().liveFlows?.at(-1)?.endedAt != null)
       assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.harness, h.name)
+      assert.equal(f.gateway.history.page().records[0].harness, h.name)
       assert.equal(forwarded.at(-1)!.path, '/coding/v1/chat/completions?trace=1')
       assert.equal(forwarded.at(-1)!.ua, 'OpenAI/JS 6.0')
       assert.ok(forwarded.at(-1)!.auth?.startsWith('Bearer '))

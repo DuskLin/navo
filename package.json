@@ -19,6 +19,7 @@
     "test:kimi-network": "tsc -p tsconfig.test.json && node scripts/kimi-auth-network-smoke.mjs",
     "test:migration:kimi": "tsc -p tsconfig.test.json && node scripts/session-migration-kimi-test.mjs",
     "test:installed": "node scripts/test-installed.mjs",
+    "test:receipt": "npm run build && node scripts/usage-receipt-smoke.mjs",
     "test:smoke": "npm run build && node scripts/custom-ai-smoke.mjs && node scripts/smoke.mjs && node scripts/tray-smoke.mjs && node scripts/session-migration-smoke.mjs",
     "test:update:mac": "tsc -p tsconfig.test.json && node scripts/test-mac-update.mjs",
     "pack": "npm run build && electron-builder --dir",
