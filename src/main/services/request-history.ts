@@ -374,6 +374,8 @@ export class RequestHistory {
       (query.end - query.start) / query.bucketMs > 366
     )
       throw new Error('统计时间范围无效')
+    if (query.receipt !== undefined && typeof query.receipt !== 'boolean')
+      throw new Error('小票统计参数无效')
     const tokensKnown =
       "(json_extract(record, '$.usage.input') IS NOT NULL OR json_extract(record, '$.usage.output') IS NOT NULL OR json_extract(record, '$.usage.cacheRead') IS NOT NULL OR json_extract(record, '$.usage.cacheWrite') IS NOT NULL)"
     if (query.allHistory && query.bucketMs === 86400000) {
@@ -599,8 +601,37 @@ export class RequestHistory {
             Math.min(Date.now(), query.end - 1)
           )
         : undefined
+    // Receipt-only aggregation stays in the statistics worker and its read transaction.
+    let receipt: UsageStats['receipt']
+    if (query.receipt) {
+      const byHarnessModel = this.db
+        .prepare(
+          `SELECT COALESCE(NULLIF(json_extract(record, '$.harness'), ''), '未知客户端') AS harness,
+          COALESCE(NULLIF(json_extract(record, '$.model'), ''), '未知模型') AS model,
+          ${aggregate} FROM requests ${where} GROUP BY harness, model ORDER BY harness, model`
+        )
+        .all(...values)
+        .map((row) => ({
+          ...totals(row),
+          harness: String(row.harness),
+          model: String(row.model)
+        }))
+      const sessions = this.db
+        .prepare(
+          `SELECT COUNT(DISTINCT NULLIF(json_extract(record, '$.sessionId'), '')) AS sessions,
+          SUM(CASE WHEN NULLIF(json_extract(record, '$.sessionId'), '') IS NULL THEN 1 ELSE 0 END) AS unknown
+          FROM requests ${where}`
+        )
+        .get(...values)!
+      receipt = {
+        byHarnessModel,
+        sessionCount: Number(sessions.sessions),
+        unidentifiedSessionRequests: Number(sessions.unknown ?? 0)
+      }
+    }
     costs.clear()
     return {
+      ...(receipt ? { receipt } : {}),
       summary,
       points,
       accounts,

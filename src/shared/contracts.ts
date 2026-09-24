@@ -61,6 +61,11 @@ export interface HelperApi {
   openReleasePage(): Promise<void>
   openIssuesPage(): Promise<void>
   openProjectPage(): Promise<void>
+  exportUsageReceipt(input: {
+    png: string
+    action: 'save' | 'copy'
+    filename: string
+  }): Promise<'saved' | 'copied' | 'cancelled'>
   getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
@@ -275,6 +280,7 @@ export interface GatewaySettings {
   cooldownSeconds: number
 }
 export interface RequestRecord {
+  harness?: string
   sessionId?: string
   provider?: Provider
   interruption?:
@@ -399,6 +405,7 @@ export const IPC = {
   quotaCycles: 'gateway:quota-cycles',
   quotaCycleExclude: 'gateway:quota-cycle-exclude',
   usageStats: 'gateway:usage-stats',
+  receiptExport: 'usage:receipt-export',
   accountImportKimi: 'account:import-kimi',
   accountImportCodex: 'account:import-codex',
   accountSave: 'account:save',

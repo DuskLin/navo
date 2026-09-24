@@ -45,6 +45,10 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 | Desktop controls            | Light and dark themes, card visibility settings, and reorderable account cards                                                   |
 | Local storage               | Encrypt configuration with system secure storage; persist request summaries in SQLite without storing prompts or response bodies |
 
+From the overview's usage section, choose **Print receipt** for today, the last 7 days, or the last 30 days. Drag to tear off the printed receipt or open the preview directly, switch between cost and tokens, choose a gradient background, and save or copy a high-resolution PNG. This is a desktop feature; reduced-motion settings skip the animation.
+
+Receipts freeze the gateway's recorded, reported usage at generation time and use the dashboard's cost calculation. Currencies stay separate. Older requests without stored client attribution appear as unknown clients; only identified sessions are deduplicated and counted.
+
 ## Supported providers
 
 | Provider    | Account type                                 | Synced information                                               |

@@ -1,8 +1,18 @@
 import { startVisiblePolling } from './visible-polling'
 import { useEffect, useId, useState } from 'react'
-import { Activity, ArrowDown, ArrowUp, CircleSlash, DollarSign, Sparkles, Zap } from 'lucide-react'
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  CircleSlash,
+  Printer,
+  DollarSign,
+  Sparkles,
+  Zap
+} from 'lucide-react'
 import type { UsageStats, UsageTotals } from '../../shared/usage'
 import { formatUsageCost, heatmapRange } from '../../shared/usage'
+import { UsageReceipt } from './UsageReceipt'
 import { UsageHeatmap } from './UsageHeatmap'
 import { RollingNumber } from './RollingNumber'
 
@@ -223,6 +233,7 @@ export function UsageDashboard({
   showTokenActivity: boolean
   showUsageTrend: boolean
 }) {
+  const [receiptOpen, setReceiptOpen] = useState(false)
   const cacheTooltipId = useId()
   const [data, setData] = useState<UsageStats>()
   const [calendar, setCalendar] = useState<UsageStats>()
@@ -286,6 +297,14 @@ export function UsageDashboard({
   if (!showTokenActivity && !showUsageTrend) return null
   return (
     <section className="usage-dashboard" aria-label="使用统计">
+      <div className="usage-receipt-heading">
+        <h3>用量统计</h3>
+        <button type="button" onClick={() => setReceiptOpen(true)}>
+          <Printer size={14} />
+          打印小票
+        </button>
+      </div>
+      {receiptOpen && <UsageReceipt close={() => setReceiptOpen(false)} />}
       {error && (
         <p className="form-error" role="alert">
           {error}

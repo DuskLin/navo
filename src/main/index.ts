@@ -25,6 +25,7 @@ import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
 import { metadataRequest } from './services/metadata-request'
 import { kimiModelConfig } from './services/kimi-model-config'
+import { exportUsageReceipt } from './services/usage-receipt-export'
 import { UsageService } from './services/usage-service'
 import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
@@ -424,6 +425,7 @@ void app
       service.history.setQuotaCycleExcluded(input)
       return service.snapshotReady()
     })
+    handle(IPC.receiptExport, (value, event) => exportUsageReceipt(value, event.sender))
     handle(IPC.usageStats, (query) => {
       const pricing = service.getRequestPricing()
       return statistics.usage(

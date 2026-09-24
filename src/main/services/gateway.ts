@@ -10,7 +10,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable, Transform } from 'node:stream'
 import { LiveFlowTracker } from './live-flow'
-import { harnessById } from '../../shared/live-flow'
+import { harnessById, identifyHarness } from '../../shared/live-flow'
 import { lanAddresses, isPrivateIPv4 } from './lan-addresses'
 import { pipeline } from 'node:stream/promises'
 import {
@@ -649,6 +649,7 @@ export class Gateway {
     let upstreamRoute: string | null = null
     let upstreamModel: string | undefined
     let sessionId: string | undefined
+    let harness: string | undefined
     let accountId: string | undefined
     let provider: RequestRecord['provider']
     const controller = new AbortController()
@@ -785,6 +786,7 @@ export class Gateway {
           session = payload.prompt_cache_key
         goSession = openCodeSession(req.headers, payload)
       }
+      harness = identifyHarness(req.headers, harnessPath?.[1])
       const historySession = requestSessionId(req.headers, payload)
       if (historySession)
         sessionId = createHash('sha256')
@@ -1171,6 +1173,7 @@ export class Gateway {
           account: accountName,
           accountId,
           sessionId,
+          harness,
           provider,
           protocol,
           inboundRoute,

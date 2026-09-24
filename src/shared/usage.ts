@@ -7,6 +7,7 @@ export interface TokenUsage {
 }
 export type UsageProtocol = 'responses' | 'chat-completions' | 'messages'
 export interface UsageQuery {
+  receipt?: boolean
   performanceByDay?: boolean
   allHistory?: boolean
   start: number
@@ -39,6 +40,11 @@ export interface ActivitySummary {
   longestStreak: number
 }
 export interface UsageStats {
+  receipt?: {
+    byHarnessModel: (UsageTotals & { harness: string; model: string })[]
+    sessionCount: number
+    unidentifiedSessionRequests: number
+  }
   accountTotals?: { accountId: string; requests: number; totalTokens: number | null }[]
   activity?: ActivitySummary
   byAccount: {

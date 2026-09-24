@@ -63,6 +63,7 @@ const api: HelperApi = {
   getRequestHistory: (before) => ipcRenderer.invoke(IPC.requestHistory, before),
   getQuotaCycles: (query) => ipcRenderer.invoke(IPC.quotaCycles, query),
   setQuotaCycleExcluded: (input) => ipcRenderer.invoke(IPC.quotaCycleExclude, input),
+  exportUsageReceipt: (input) => ipcRenderer.invoke(IPC.receiptExport, input),
   getUsageStats: (query) => ipcRenderer.invoke(IPC.usageStats, query),
   importKimiAccount: (region) => ipcRenderer.invoke(IPC.accountImportKimi, region),
   importCodexAccount: () => ipcRenderer.invoke(IPC.accountImportCodex),
