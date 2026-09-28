@@ -933,12 +933,17 @@ export class Gateway {
           const targetModel = mappedModel(account, model)
           const targetPayload = targetModel === model ? payload : { ...payload, model: targetModel }
           const targetRoute = modelUpstreamRoute(account, targetModel, route)
+          const metadata = this.modelMetadata(targetModel, provider)
           const converted =
             targetRoute !== route || (account.provider === 'codex' && payload.stream !== true)
-              ? convertRequest(targetPayload, routeProtocol(route), routeProtocol(targetRoute))
+              ? convertRequest(
+                  targetPayload,
+                  routeProtocol(route),
+                  routeProtocol(targetRoute),
+                  metadata?.limit?.output
+                )
               : undefined
           const wireBody = converted?.body ?? targetPayload
-          const metadata = this.modelMetadata(targetModel, provider)
           const budget = (value: Wire) =>
             Object.fromEntries(
               [

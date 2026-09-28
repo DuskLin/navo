@@ -36,6 +36,15 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
         url: String(url),
         body: JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
       })
+      if (String(url).endsWith('/v1/messages'))
+        return Response.json({
+          id: 'message-test',
+          type: 'message',
+          role: 'assistant',
+          model: 'upstream',
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn'
+        })
       return Response.json({
         id: 'chat-test',
         model: 'upstream',
@@ -84,7 +93,16 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
         input: 'hi'
       })
       assert.equal(call.body.model, 'upstream')
-      assert.equal(call.body[key], output)
+      assert.equal(call.body[key], 978090)
+      const defaults = await send(route, {
+        model: 'alias',
+        input: 'hi',
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+      assert.equal(
+        defaults.body[route === '/v1/responses' ? 'max_output_tokens' : 'max_tokens'],
+        output
+      )
       assert.equal(call.url.endsWith(route), true)
     }
     const models = (await (await fetch(reserved.url + '/v1/models')).json()).data
@@ -125,15 +143,21 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
       max_output_tokens: 978090
     })
     assert.equal(converted.url.endsWith('/v1/chat/completions'), true)
-    assert.equal(converted.body.max_tokens, output)
+    assert.equal(converted.body.max_tokens, 978090)
     assert.equal(converted.body.max_output_tokens, undefined)
     output = 32768
     await gateway.pricing.refresh(true)
     assert.equal(
-      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
-        .max_tokens,
+      (await send('/v1/responses', { model: 'alias', input: 'hi' })).body.max_tokens,
       output
     )
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = { upstream: ['messages'], unknown: ['messages'] }
+    })
+    const missing = await send('/v1/responses', { model: 'unknown', input: 'hi' })
+    assert.equal(missing.body.max_tokens, undefined)
+    const known = await send('/v1/responses', { model: 'alias', input: 'hi' })
+    assert.equal(known.body.max_tokens, output)
     const manualPrice = {
       provider: 'kimi',
       model: 'upstream',
@@ -146,8 +170,7 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
     }
     await f.store.saveModelPrice(manualPrice)
     assert.equal(
-      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
-        .max_tokens,
+      (await send('/v1/responses', { model: 'alias', input: 'hi' })).body.max_tokens,
       16384
     )
     const updatedModels = (await (await fetch(reserved.url + '/v1/models')).json()).data
@@ -157,8 +180,7 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
     )
     await f.store.saveModelPrice({ ...manualPrice, limits: {} })
     assert.equal(
-      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
-        .max_tokens,
+      (await send('/v1/responses', { model: 'alias', input: 'hi' })).body.max_tokens,
       output
     )
   } finally {
@@ -202,7 +224,6 @@ test('failover recomputes output limits from the original request for each mappe
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: 'alias',
-        max_tokens: 978090,
         messages: [{ role: 'user', content: 'hi' }]
       })
     })
