@@ -3314,6 +3314,67 @@ test('Command Code GOAT persists endpoint metadata and forwards with provider pr
   }
 })
 
+for (const provider of ['commandcode-goat', 'custom'] as const)
+  test(`${provider} Responses forwarding applies summary compatibility only to Command Code`, async () => {
+    const f = await storeFixture()
+    const calls: Record<string, any>[] = []
+    const gateway = f.createGateway(
+      async (_url, init) => {
+        const body = JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
+        calls.push(body)
+        if (provider === 'commandcode-goat' && Object.hasOwn(body.reasoning, 'summary'))
+          return Response.json({ error: 'json: unknown field "summary"' }, { status: 400 })
+        return Response.json({
+          id: 'resp_test',
+          status: 'completed',
+          output: [
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] }
+          ]
+        })
+      },
+      async () => Response.json({ data: [{ id: 'test-model' }] })
+    )
+    const reserved = await listen((_req, res) => res.end())
+    await reserved.close()
+    try {
+      await gateway.saveAccount({
+        ...accountInput('summary-test'),
+        provider,
+        ...(provider === 'custom' ? { baseUrl: 'https://custom.example/v1' } : {}),
+        modelProtocols: { 'test-model': ['responses'] }
+      })
+      await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+      await gateway.setRunning(true)
+      for (const route of ['/v1/chat/completions', '/v1/messages', '/v1/responses']) {
+        const payload =
+          route === '/v1/responses'
+            ? { input: 'hi', reasoning: { effort: 'high', summary: 'auto' } }
+            : {
+                messages: [{ role: 'user', content: 'hi' }],
+                ...(route === '/v1/messages'
+                  ? { thinking: { type: 'enabled', budget_tokens: 1024 }, max_tokens: 2048 }
+                  : { reasoning_effort: 'high' })
+              }
+        const response = await fetch(reserved.url + route, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${f.store.get().groups[0].key}`,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ model: 'test-model', ...payload })
+        })
+        assert.equal(response.status, 200, await response.text())
+        assert.deepEqual(
+          calls.at(-1)!.reasoning,
+          provider === 'commandcode-goat' ? { effort: 'high' } : { effort: 'high', summary: 'auto' }
+        )
+      }
+      assert.equal(calls.length, 3)
+    } finally {
+      await f.cleanup()
+    }
+  })
+
 test('Command Code extra credits keep exhausted plan windows schedulable until depleted', () => {
   const now = Date.now()
   const scheduler = new Scheduler(() => now)
