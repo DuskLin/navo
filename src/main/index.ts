@@ -17,6 +17,8 @@ import { autoUpdater } from 'electron-updater'
 import { isAbsolute, join } from 'node:path'
 import { isTrustedRendererUrl } from './services/renderer-trust'
 import { IPC } from '../shared/contracts'
+import { canReportRequest } from '../shared/request-failure'
+import { requestIssueReport } from './services/request-diagnostics'
 import { SettingsStore, validateSettings } from './services/settings'
 import { LaunchAtLogin } from './services/launch-at-login'
 import { RequestSleepBlocker } from './services/request-sleep-blocker'
@@ -420,6 +422,14 @@ void app
     handle(IPC.dashboardCheckPublic, () => dashboard!.checkPublic())
     handle(IPC.dashboardOpen, () => shell.openExternal(dashboard!.state().localUrl))
     handle(IPC.requestHistory, (before) => service.history.page(before as number | undefined))
+    handle(IPC.requestReportIssue, async (id) => {
+      const { record, diagnostic } = service.history.failureReport(id)
+      if (!canReportRequest(record)) throw new Error('仅支持上报非 499 的失败请求')
+      const report = requestIssueReport(record, diagnostic, app.getVersion())
+      if (report.clipboardBody) clipboard.writeText(report.clipboardBody)
+      await shell.openExternal(report.url)
+      return { copied: !!report.clipboardBody }
+    })
     handle(IPC.quotaCycles, (query) => service.history.getQuotaCycles(query))
     handle(IPC.quotaCycleExclude, (input) => {
       service.history.setQuotaCycleExcluded(input)

@@ -5,6 +5,7 @@ import type { QuotaWindow, RequestHistoryPage, RequestRecord } from '../../share
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
 import { createRequestCostCalculator, type RequestPricing } from '../../shared/request-cost'
 import { localDayKey, summarizeActivity } from '../../shared/usage'
+import { isFailedRequest, type RequestFailureLog } from '../../shared/request-failure'
 import type {
   QuotaCostCycle,
   QuotaCostEstimate,
@@ -78,6 +79,11 @@ export class RequestHistory {
         id TEXT NOT NULL UNIQUE,
         record TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS request_failures (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id TEXT NOT NULL UNIQUE,
+        diagnostic TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS requests_time ON requests(json_extract(record, '$.time'));
       CREATE INDEX IF NOT EXISTS requests_quota_usage ON requests(json_extract(record, '$.accountId'), json_extract(record, '$.time'));
       CREATE INDEX IF NOT EXISTS requests_model ON requests(json_extract(record, '$.model'));
@@ -99,18 +105,34 @@ export class RequestHistory {
       .prepare("DELETE FROM requests WHERE json_extract(record, '$.time') < ?")
       .run(Date.now() - REQUEST_RETENTION_MS)
     if (result.changes) {
+      this.db.exec('DELETE FROM request_failures WHERE request_id NOT IN (SELECT id FROM requests)')
       this.quotaRecords.clear()
       this.accountRevisions.clear()
       this.quotaEpoch++
       this.revision++
     }
   }
-  append(record: RequestRecord): void {
+  append(record: RequestRecord, diagnostic?: RequestFailureLog): void {
     this.prune()
     if (record.time < Date.now() - REQUEST_RETENTION_MS) return
-    this.db
-      .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
-      .run(record.id, JSON.stringify(record))
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db
+        .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
+        .run(record.id, JSON.stringify(record))
+      if (isFailedRequest(record) && diagnostic) {
+        this.db
+          .prepare('INSERT INTO request_failures (request_id, diagnostic) VALUES (?, ?)')
+          .run(record.id, JSON.stringify(diagnostic))
+        this.db.exec(
+          'DELETE FROM request_failures WHERE seq NOT IN (SELECT seq FROM request_failures ORDER BY seq DESC LIMIT 300)'
+        )
+      }
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
     this.quotaRecords.clear()
     this.revision++
     if (record.accountId)
@@ -121,6 +143,19 @@ export class RequestHistory {
   }
   quotaRevision(accountId: string): string {
     return `${this.quotaEpoch}:${this.accountRevisions.get(accountId) ?? 0}`
+  }
+  failureReport(id: unknown): { record: RequestRecord; diagnostic?: RequestFailureLog } {
+    if (typeof id !== 'string' || !id || id.length > 200) throw new Error('请求记录 ID 无效')
+    this.prune()
+    const row = this.db.prepare('SELECT record FROM requests WHERE id = ?').get(id)
+    if (!row) throw new Error('请求记录已过期或不存在，请刷新后重试')
+    const failure = this.db
+      .prepare('SELECT diagnostic FROM request_failures WHERE request_id = ?')
+      .get(id)
+    return {
+      record: JSON.parse(String(row.record)),
+      diagnostic: failure ? JSON.parse(String(failure.diagnostic)) : undefined
+    }
   }
   observeQuota(
     accountId: string,

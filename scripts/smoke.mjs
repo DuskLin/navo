@@ -667,7 +667,7 @@ try {
     await page.getByRole('dialog').waitFor({ state: 'hidden' })
     await page.getByText(name, { exact: true }).waitFor()
   }
-  await page.getByRole('tab', { name: '费用管理', exact: true }).click()
+  await page.getByRole('tab', { name: '模型管理', exact: true }).click()
   const pricesTable = page.getByRole('table', { name: '模型单价', exact: true })
   assert.equal(await pricesTable.locator('tbody tr').count(), 2)
   await page.waitForFunction(
@@ -679,35 +679,50 @@ try {
     .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
     .click()
   await page.getByLabel('输入单价（USD / 百万 token）', { exact: true }).fill('0')
-  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  const contextLimit = page.getByLabel('上下文窗口（token）', { exact: true })
+  const outputLimit = page.getByLabel('最大输出（token）', { exact: true })
+  assert.equal(await contextLimit.getAttribute('placeholder'), '1048576')
+  assert.equal(await outputLimit.getAttribute('placeholder'), '32768')
+  await contextLimit.fill('1048576')
+  await outputLimit.fill('393216')
+  await page.screenshot({ path: join(artifacts, 'model-token-limits.png') })
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   await pricesTable.getByRole('cell', { name: '0 USD · 手动', exact: true }).waitFor()
+  assert.deepEqual(
+    (await page.evaluate(() => window.navo.getGateway())).modelPrices.find((p) => p.model === 'kimi-for-coding').limits,
+    { context: 1048576, output: 393216 }
+  )
   await page
     .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
     .click()
   await page.getByRole('button', { name: '恢复 API 默认值', exact: true }).click()
-  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  assert.equal(await outputLimit.inputValue(), '393216')
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   await pricesTable.getByRole('cell', { name: '1 USD · API 默认', exact: true }).waitFor()
   await page
     .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
     .click()
   await page.getByLabel('币种', { exact: true }).selectOption('CNY')
+  await page.getByRole('button', { name: '恢复目录限制', exact: true }).click()
+  assert.equal(await contextLimit.inputValue(), '')
+  assert.equal(await outputLimit.inputValue(), '')
   await page.getByLabel('输入单价（CNY / 百万 token）', { exact: true }).fill('1.25')
   await page.getByLabel('输出单价（CNY / 百万 token）', { exact: true }).fill('8')
   await page.getByLabel('缓存读取（CNY / 百万 token）', { exact: true }).fill('0')
-  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   const priceRow = pricesTable.getByRole('row').filter({ hasText: 'kimi-for-coding' })
   await priceRow.getByRole('cell', { name: '1.25 CNY · 手动', exact: true }).waitFor()
   await priceRow.getByRole('cell', { name: '0 CNY · 默认 0', exact: true }).waitFor()
   pricingUnavailable = true
-  await page.getByRole('button', { name: '刷新默认价格', exact: true }).click()
+  await page.getByRole('button', { name: '刷新默认数据', exact: true }).click()
   await page.getByText('默认价格更新失败，继续使用上次缓存，可稍后重试', { exact: true }).waitFor()
   await priceRow.getByRole('cell', { name: '1.25 CNY · 手动', exact: true }).waitFor()
   await pricesTable.getByRole('cell', { name: '2 USD · API 默认', exact: true }).waitFor()
   pricingUnavailable = false
-  await page.getByRole('button', { name: '刷新默认价格', exact: true }).click()
+  await page.getByRole('button', { name: '刷新默认数据', exact: true }).click()
   await page
     .getByText('默认价格更新失败，继续使用上次缓存，可稍后重试', { exact: true })
     .waitFor({ state: 'hidden' })
@@ -728,7 +743,7 @@ try {
     .getByRole('button', { name: '应用 kimi-for-coding / kimi-for-coding 价格', exact: true })
     .click()
   await page.getByText('已匹配：kimi-for-coding / kimi-for-coding', { exact: true }).waitFor()
-  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   assert.equal(
     (await page.evaluate(() => window.navo.getGateway())).modelPrices.find((p) => p.model === 'k3')

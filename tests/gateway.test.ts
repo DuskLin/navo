@@ -26,6 +26,197 @@ import { parseKimiQuota, quotaWindow } from '../src/shared/kimi-quota'
 import { parseDeepSeekBalance } from '../src/shared/deepseek-balance'
 import { openCodeGoRoute, openCodeSession, parseOpenCodeGoQuota } from '../src/shared/opencode-go'
 
+test('gateway applies catalog budgets after mapping/conversion and advertises model limits', async () => {
+  const f = await storeFixture()
+  const calls: { url: string; body: Record<string, any> }[] = []
+  let output = 393216
+  const gateway = f.createGateway(
+    async (url, init) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
+      })
+      return Response.json({
+        id: 'chat-test',
+        model: 'upstream',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+      })
+    },
+    undefined,
+    async () =>
+      Response.json({
+        'kimi-for-coding': {
+          models: {
+            upstream: { limit: { context: 1048576, output } }
+          }
+        }
+      })
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await f.store.saveAccount(
+      { ...accountInput('limits'), modelMappings: { alias: 'upstream' } },
+      { models: ['upstream', 'unknown'], maxConcurrency: 20, checkedAt: Date.now(), warning: '' }
+    )
+    await gateway.pricing.refresh()
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const send = async (route: string, body: Record<string, any>) => {
+      const response = await fetch(reserved.url + route, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      assert.equal(response.status, 200, await response.text())
+      return calls.at(-1)!
+    }
+    for (const [route, key] of [
+      ['/v1/messages', 'max_tokens'],
+      ['/v1/responses', 'max_output_tokens'],
+      ['/v1/chat/completions', 'max_tokens'],
+      ['/v1/chat/completions', 'max_completion_tokens']
+    ]) {
+      const call = await send(route, {
+        model: 'alias',
+        [key]: 978090,
+        messages: [{ role: 'user', content: 'hi' }],
+        input: 'hi'
+      })
+      assert.equal(call.body.model, 'upstream')
+      assert.equal(call.body[key], output)
+      assert.equal(call.url.endsWith(route), true)
+    }
+    const models = (await (await fetch(reserved.url + '/v1/models')).json()).data
+    assert.deepEqual(
+      models.find((m: { id: string }) => m.id === 'alias'),
+      {
+        id: 'alias',
+        object: 'model',
+        limit: { context: 1048576, output },
+        context_length: 1048576,
+        max_output_tokens: output
+      }
+    )
+    assert.deepEqual(
+      models.find((m: { id: string }) => m.id === 'unknown'),
+      { id: 'unknown', object: 'model' }
+    )
+    assert.equal(
+      (await send('/v1/responses', { model: 'unknown', max_output_tokens: 978090, input: 'hi' }))
+        .body.max_output_tokens,
+      978090
+    )
+    assert.equal(
+      (await send('/v1/messages/count_tokens', { model: 'alias', messages: [] })).body.max_tokens,
+      undefined
+    )
+    assert.equal(
+      (await send('/v1/messages', { model: 'alias', messages: [{ role: 'user', content: 'hi' }] }))
+        .body.max_tokens,
+      output
+    )
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = { upstream: ['chat-completions'] }
+    })
+    const converted = await send('/v1/responses', {
+      model: 'alias',
+      input: 'hi',
+      max_output_tokens: 978090
+    })
+    assert.equal(converted.url.endsWith('/v1/chat/completions'), true)
+    assert.equal(converted.body.max_tokens, output)
+    assert.equal(converted.body.max_output_tokens, undefined)
+    output = 32768
+    await gateway.pricing.refresh(true)
+    assert.equal(
+      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
+        .max_tokens,
+      output
+    )
+    const manualPrice = {
+      provider: 'kimi',
+      model: 'upstream',
+      currency: 'USD',
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      limits: { output: 16384 }
+    }
+    await f.store.saveModelPrice(manualPrice)
+    assert.equal(
+      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
+        .max_tokens,
+      16384
+    )
+    const updatedModels = (await (await fetch(reserved.url + '/v1/models')).json()).data
+    assert.equal(
+      updatedModels.find((m: { id: string }) => m.id === 'alias').max_output_tokens,
+      16384
+    )
+    await f.store.saveModelPrice({ ...manualPrice, limits: {} })
+    assert.equal(
+      (await send('/v1/responses', { model: 'alias', input: 'hi', max_output_tokens: 978090 })).body
+        .max_tokens,
+      output
+    )
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('failover recomputes output limits from the original request for each mapped target', async () => {
+  const f = await storeFixture()
+  const calls: Record<string, any>[] = []
+  const gateway = f.createGateway(
+    async (_url, init) => {
+      const body = JSON.parse(Buffer.from(init!.body as Uint8Array).toString())
+      calls.push(body)
+      return calls.length === 1 ? new Response('', { status: 429 }) : Response.json({ choices: [] })
+    },
+    undefined,
+    async () =>
+      Response.json({
+        'kimi-for-coding': {
+          models: {
+            small: { limit: { output: 4096 } },
+            large: { limit: { output: 8192 } }
+          }
+        }
+      })
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    for (const model of ['small', 'large'])
+      await f.store.saveAccount(
+        { ...accountInput(model), modelMappings: { alias: model } },
+        { models: [model], maxConcurrency: 20, checkedAt: Date.now(), warning: '' }
+      )
+    await gateway.pricing.refresh()
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port, maxAttempts: 2 })
+    await gateway.setRunning(true)
+    const response = await fetch(reserved.url + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'alias',
+        max_tokens: 978090,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    })
+    assert.equal(response.status, 200, await response.text())
+    assert.equal(calls.length, 2)
+    assert.equal(new Set(calls.map((call) => call.model)).size, 2)
+    for (const call of calls) assert.equal(call.max_tokens, call.model === 'small' ? 4096 : 8192)
+    const registry = await (await fetch(reserved.url + '/api.json')).json()
+    assert.equal(registry.navo.models.alias.limit.output, 4096)
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('OpenCode Go percent quotas preserve three windows, reset formats and unknown values', () => {
   const quota = parseOpenCodeGoQuota({
     usage: {
@@ -1108,6 +1299,69 @@ async function gatewayFixture(
     }
   }
 }
+
+test('failed gateway requests persist sanitized HTTP, retry and streaming diagnostics without altering responses', async () => {
+  let mode = 'http'
+  const f = await gatewayFixture((_req, res) => {
+    if (mode === 'stream') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end('data: {"error":{"type":"api_error","message":"stream failed private-prompt"}}\n\n')
+    } else {
+      res.writeHead(mode === 'retry' ? 429 : 400, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'invalid_value',
+            message: 'invalid private-prompt secret-a',
+            request: { private: 'private-prompt' }
+          }
+        })
+      )
+    }
+  })
+  try {
+    for (const next of ['http', 'retry', 'stream']) {
+      mode = next
+      for (const account of f.store.get().accounts) f.gateway.scheduler.reset(account.id)
+      const previous = f.gateway.history.page().total
+      const response = await f.post({
+        messages: [{ role: 'user', content: 'private-prompt' }],
+        stream: next === 'stream',
+        temperature: 0.5
+      })
+      const raw = await response.text()
+      assert.equal(response.status, next === 'http' ? 400 : next === 'retry' ? 503 : 200)
+      if (next !== 'retry') assert.match(raw, /private-prompt/)
+      await eventually(() => f.gateway.history.page().total > previous)
+      const latest = f.gateway.history.page().records[0]
+      const log = f.gateway.history.failureReport(latest.id).diagnostic!
+      assert.ok(log)
+      assert.equal(log.attempts?.length, latest.attempts)
+      assert.equal(log.attempts?.[0].upstreamModel, 'kimi-for-coding')
+      assert.ok(log.attempts?.[0].account)
+      assert.ok(log.attempts?.[0].group)
+      assert.ok(log.attempts?.[0].response)
+      const decision = log.attempts?.[0].limitDecision as Record<string, unknown>
+      assert.ok(decision)
+      assert.ok('catalogLimits' in decision)
+      assert.ok('manualLimits' in decision)
+      assert.ok('effectiveLimits' in decision)
+      assert.ok('catalogUpdatedAt' in decision)
+      assert.ok('before' in decision && 'after' in decision)
+      const stored = JSON.stringify(log)
+      assert.ok(!JSON.stringify(log.request).includes('private-prompt'))
+      assert.ok(!JSON.stringify(log.forwardedRequest).includes('private-prompt'))
+      assert.ok(stored.includes('private-prompt'))
+      if (next !== 'stream') assert.ok(stored.includes('secret-a'))
+      assert.match(stored, /"temperature":0.5/)
+      assert.match(stored, next === 'stream' ? /api_error/ : /invalid_value/)
+      if (next === 'retry') assert.ok(log.errors.some((error) => error.status === 429))
+      if (next === 'stream') assert.equal(latest.status, 502)
+    }
+  } finally {
+    await f.cleanup()
+  }
+})
 
 test('额度未知时均衡分配，旧权重和优先级不干预，会话保持和冷却有效', () => {
   let now = 1000

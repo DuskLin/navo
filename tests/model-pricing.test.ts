@@ -32,6 +32,25 @@ test('model prices reject invalid amounts, identities and currencies while prese
     assert.throws(() => validateModelPrice({ ...price, ...patch }))
 })
 
+test('token limits accept only positive integers and allow independent overrides and reset', () => {
+  for (const limits of [
+    { output: 393216 },
+    { context: 1048576 },
+    { context: 1048576, output: 393216 }
+  ])
+    assert.deepEqual(validateModelPrice({ ...price, limits }).limits, limits)
+  for (const key of ['context', 'output'])
+    for (const value of [0, -1, 1.5, '393216', Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
+      assert.throws(() => validateModelPrice({ ...price, limits: { [key]: value } }), /正整数/)
+  assert.throws(
+    () => validateModelPrice({ ...price, limits: { context: 100, output: 101 } }),
+    /不能超过/
+  )
+  assert.throws(() => validateModelPrice({ ...price, limits: [] }))
+  assert.deepEqual(validateModelPrice({ ...price, limits: {} }), price)
+  assert.deepEqual(validateModelPrice({ ...price, limits: { context: null, output: null } }), price)
+})
+
 test('prices persist independently by provider, survive account refresh, and migrate old stores', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'model-price-test-'))
   const file = join(dir, 'gateway.json')
@@ -63,6 +82,7 @@ test('prices persist independently by provider, survive account refresh, and mig
     await store.saveModelPrice({
       ...price,
       output: 10,
+      limits: { context: 1048576, output: 393216 },
       catalogMatch: { provider: 'moonshotai', model: 'kimi-k3' }
     })
     const account = store.get().accounts[0]
@@ -78,7 +98,12 @@ test('prices persist independently by provider, survive account refresh, and mig
     assert.equal(restored.get().modelPrices.length, 2)
     assert.deepEqual(
       restored.get().modelPrices.find((p) => p.provider === 'kimi'),
-      { ...price, output: 10, catalogMatch: { provider: 'moonshotai', model: 'kimi-k3' } }
+      {
+        ...price,
+        output: 10,
+        limits: { context: 1048576, output: 393216 },
+        catalogMatch: { provider: 'moonshotai', model: 'kimi-k3' }
+      }
     )
     assert.equal(restored.get().modelPrices.find((p) => p.provider === 'deepseek')?.input, 0.1)
     await restored.deleteAccount(ids[0])
