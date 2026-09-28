@@ -1,4 +1,5 @@
 import { normalizeMiniMaxRequest } from './minimax-request'
+import { normalizeCommandCodeRequest } from './commandcode-request'
 import { isKimiUserAgent, requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import { KimiAuth, kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
@@ -873,7 +874,11 @@ export class Gateway {
               ? convertRequest(targetPayload, routeProtocol(route), routeProtocol(targetRoute))
               : undefined
           const wireBody = converted?.body ?? targetPayload
-          const normalizedBody = normalizeMiniMaxRequest(wireBody, targetModel, targetRoute)
+          const normalizedBody = normalizeCommandCodeRequest(
+            normalizeMiniMaxRequest(wireBody, targetModel, targetRoute),
+            account.provider,
+            targetRoute
+          )
           const requestBody =
             account.provider === 'codex'
               ? Buffer.from(JSON.stringify(codexRequest(wireBody)))

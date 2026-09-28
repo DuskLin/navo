@@ -522,7 +522,7 @@ export function convertRequest(
     obj(body.reasoning).effort ?? body.reasoning_effort ?? obj(body.output_config).effort
   if (effort) {
     if (target === 'responses')
-      converted.reasoning = { effort: effort === 'max' ? 'xhigh' : effort }
+      converted.reasoning = { effort: effort === 'max' ? 'xhigh' : effort, summary: 'auto' }
     else if (target === 'chat-completions')
       converted.reasoning_effort = effort === 'max' ? 'xhigh' : effort
     else {
@@ -537,7 +537,7 @@ export function convertRequest(
         }
     }
   } else if (source === 'messages' && obj(body.thinking).type === 'enabled') {
-    if (target === 'responses') converted.reasoning = { effort: 'high' }
+    if (target === 'responses') converted.reasoning = { effort: 'high', summary: 'auto' }
     else converted.reasoning_effort = 'high'
   }
   const tools = toolsFrom(body, source, context)

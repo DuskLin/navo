@@ -318,21 +318,25 @@ for (const source of ['chat-completions', 'messages'] as const)
     assert.deepEqual(original, snapshot)
   })
 
-test('Responses conversion maps reasoning effort without requesting an unsupported summary', () => {
+test('Responses conversion preserves automatic reasoning summaries for compatible upstreams', () => {
   for (const source of ['chat-completions', 'messages'] as const) {
     for (const effort of ['low', 'high', 'max']) {
       const input = request(source)
       if (source === 'chat-completions') input.reasoning_effort = effort
       else input.output_config = { effort }
       const { body } = convertRequest(input, source, 'responses')
-      assert.deepEqual(body.reasoning, { effort: effort === 'max' ? 'xhigh' : effort })
+      assert.deepEqual(body.reasoning, {
+        effort: effort === 'max' ? 'xhigh' : effort,
+        summary: 'auto'
+      })
     }
   }
   const input = request('messages')
   delete input.output_config
   input.thinking = { type: 'enabled', budget_tokens: 1024 }
   assert.deepEqual(convertRequest(input, 'messages', 'responses').body.reasoning, {
-    effort: 'high'
+    effort: 'high',
+    summary: 'auto'
   })
   const native = { ...request('responses'), reasoning: { effort: 'high', summary: 'auto' } }
   assert.deepEqual(convertRequest(native, 'responses', 'responses').body, native)
