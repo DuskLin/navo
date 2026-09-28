@@ -5,7 +5,7 @@ import { KimiAuth, kimiHeaders } from './kimi-auth'
 import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
-import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
+import { accountSupportsModel, mappedModel } from '../../shared/model-mapping'
 import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -21,7 +21,8 @@ import {
   type AccountModelTestResult,
   type GatewaySnapshot,
   type RequestRecord,
-  type Region
+  type Region,
+  type Provider
 } from '../../shared/contracts'
 import {
   GatewayStore,
@@ -34,10 +35,19 @@ import {
 } from './gateway-store'
 import { ModelPriceCatalog } from './model-price-catalog'
 import { registryModels } from './model-registry'
+import { createModelMetadataResolver } from '../../shared/model-metadata'
+import { normalizeModelRequestLimits } from './model-request-limits'
 import { KimiCapabilities } from './kimi-capabilities'
 import { Scheduler } from './scheduler'
 import { FirstTokenObserver } from './first-token'
 import { RequestHistory } from './request-history'
+import {
+  RequestDiagnostics,
+  diagnosticHeaders,
+  diagnosticEndpoint,
+  requestShape
+} from './request-diagnostics'
+import { isFailedRequest, type RequestFailureLog } from '../../shared/request-failure'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import type { TokenUsage, UsageProtocol } from '../../shared/usage'
 import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
@@ -139,6 +149,8 @@ export class Gateway {
   private pricingKey = ''
   private requestPricing?: { value: RequestPricing; version: number }
   private catalogRevision = -1
+  private metadataVersion = ''
+  private resolveModelMetadata = createModelMetadataResolver([], [])
   private refreshTimer?: ReturnType<typeof setInterval>
   private refreshWork?: Promise<void>
   private refreshController?: AbortController
@@ -184,6 +196,18 @@ export class Gateway {
     }
     this.pricingInputVersion = inputVersion
     return this.requestPricing
+  }
+  private modelMetadata(model: string, provider: Provider) {
+    const version = `${this.store.revision}:${this.pricing.revision}`
+    if (this.metadataVersion !== version) {
+      const { modelPriceCatalog, modelPrices } = this.getRequestPricing().value
+      this.resolveModelMetadata = createModelMetadataResolver(
+        modelPriceCatalog.entries,
+        modelPrices
+      )
+      this.metadataVersion = version
+    }
+    return this.resolveModelMetadata(model, provider, true)
   }
   snapshot(): GatewaySnapshot {
     return { ...this.snapshotState(), modelPriceCatalog: this.pricing.snapshot() }
@@ -424,9 +448,9 @@ export class Gateway {
       provider === 'custom' ? normalizeCustomBaseUrl(input.baseUrl ?? old?.baseUrl) : undefined
     )
   }
-  private recordRequest(record: RequestRecord): void {
+  private recordRequest(record: RequestRecord, diagnostic?: RequestFailureLog): void {
     try {
-      this.history.append(record)
+      this.history.append(record, diagnostic)
     } catch {
       this.error = '请求记录保存失败，请检查磁盘空间与文件权限'
     }
@@ -486,19 +510,22 @@ export class Gateway {
       { model, protocol, provider, region: input.region as Region, baseUrl },
       credential,
       this.request,
-      (telemetry) =>
-        this.recordRequest({
-          id: randomUUID(),
-          time: started,
-          group: '模型测试',
-          account: sameAccount ? old.name : `${draftName || old?.name || '新账号'}（未保存配置）`,
-          accountId: sameAccount ? old.id : undefined,
-          provider,
-          protocol,
-          model,
-          attempts: 1,
-          ...telemetry
-        })
+      (telemetry, diagnostic) =>
+        this.recordRequest(
+          {
+            id: randomUUID(),
+            time: started,
+            group: '模型测试',
+            account: sameAccount ? old.name : `${draftName || old?.name || '新账号'}（未保存配置）`,
+            accountId: sameAccount ? old.id : undefined,
+            provider,
+            protocol,
+            model,
+            attempts: 1,
+            ...telemetry
+          },
+          diagnostic
+        )
     )
   }
   async refreshAccount(value: unknown, signal?: AbortSignal): Promise<GatewaySnapshot> {
@@ -636,6 +663,7 @@ export class Gateway {
     }
   }
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const diagnostics = new RequestDiagnostics()
     let flowId: string | undefined
     const started = Date.now()
     const startedTick = performance.now()
@@ -655,6 +683,23 @@ export class Gateway {
     let provider: RequestRecord['provider']
     const controller = new AbortController()
     const settings = this.store.get().settings
+    diagnostics.log.context = {
+      method: req.method,
+      headers: diagnosticHeaders(
+        new Headers(
+          Object.entries(req.headers).flatMap(([key, value]) =>
+            value === undefined
+              ? []
+              : [[key, Array.isArray(value) ? value.join(', ') : value] as [string, string]]
+          )
+        )
+      ),
+      settings: {
+        maxAttempts: settings.maxAttempts,
+        timeoutSeconds: settings.timeoutSeconds,
+        cooldownSeconds: settings.cooldownSeconds
+      }
+    }
     let disconnected = false
     let timedOut = false
     let upstreamStreamFailed = false
@@ -687,6 +732,7 @@ export class Gateway {
     try {
       if (req.headers.origin) throw new HttpError(403, '本地网关不接受网页跨域请求')
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      diagnostics.log.context!.query = requestShape(Object.fromEntries(url.searchParams))
       const harnessPath = url.pathname.match(/^\/harness\/([^/]+)(\/.*)$/)
       if (harnessPath && !harnessById(harnessPath[1])) throw new HttpError(404, 'Harness 不支持')
       const pathname = harnessPath ? harnessPath[2] : url.pathname
@@ -721,7 +767,7 @@ export class Gateway {
           ? data.groups.find((g) => g.id === 'default')
           : data.groups.find((g) => matchesKey(key, g.key) && (!match || g.id === match[1]))
       if (!group) throw new HttpError(401, '分组密钥无效或与接入地址不匹配')
-      groupName = '统一账号池'
+      groupName = group.name
       if (!group.enabled) throw new HttpError(403, '该分组已停用')
       authorized = true
       if (isModels) {
@@ -729,7 +775,7 @@ export class Gateway {
         const accounts = data.accounts.filter(
           (account) => account.enabled && account.credential.accessToken && account.capabilities
         )
-        const models = [...new Set(accounts.flatMap(exposedModels))]
+        const models = registryModels(accounts, this.pricing.snapshot().entries, data.modelPrices)
         finalStatus = 200
         res.writeHead(200, {
           'content-type': 'application/json',
@@ -744,14 +790,19 @@ export class Gateway {
                     name: 'Navo',
                     type: 'openai',
                     api: `http://${settings.lanSharing && isPrivateIPv4(req.socket.localAddress ?? '') ? req.socket.localAddress : '127.0.0.1'}:${settings.port}${harnessPath ? `/harness/${harnessPath[1]}` : ''}/v1`,
-                    models: registryModels(
-                      accounts,
-                      this.pricing.snapshot().entries,
-                      data.modelPrices
-                    )
+                    models
                   }
                 }
-              : { object: 'list', data: models.map((id) => ({ id, object: 'model' })) }
+              : {
+                  object: 'list',
+                  data: Object.values(models).map(({ id, limit }) => ({
+                    id,
+                    object: 'model',
+                    ...(limit ? { limit } : {}),
+                    ...(limit?.context ? { context_length: limit.context } : {}),
+                    ...(limit?.output ? { max_output_tokens: limit.output } : {})
+                  }))
+                }
           )
         )
         return
@@ -764,6 +815,7 @@ export class Gateway {
       if (body) {
         try {
           payload = object(JSON.parse(body.toString('utf8')))
+          diagnostics.request(payload)
           model = string(payload.model, '模型', 200)
         } catch {
           throw new HttpError(400, '请求须为 JSON 对象，并包含有效的 model')
@@ -845,6 +897,18 @@ export class Gateway {
         if (flowId) this.liveFlows.update(flowId, { state: 'waiting' })
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
+        const diagnosticAttempt: Record<string, unknown> = {
+          attempt: attempts,
+          account: accountName,
+          accountId,
+          group: groupName,
+          provider,
+          region: account.region,
+          kind: account.kind,
+          model,
+          startedAt: new Date(attemptStarted).toISOString()
+        }
+        diagnostics.attempt(diagnosticAttempt)
         try {
           const credential =
             account.provider === 'codex'
@@ -869,19 +933,59 @@ export class Gateway {
           const targetModel = mappedModel(account, model)
           const targetPayload = targetModel === model ? payload : { ...payload, model: targetModel }
           const targetRoute = modelUpstreamRoute(account, targetModel, route)
+          const metadata = this.modelMetadata(targetModel, provider)
           const converted =
             targetRoute !== route || (account.provider === 'codex' && payload.stream !== true)
-              ? convertRequest(targetPayload, routeProtocol(route), routeProtocol(targetRoute))
+              ? convertRequest(
+                  targetPayload,
+                  routeProtocol(route),
+                  routeProtocol(targetRoute),
+                  metadata?.limit?.output
+                )
               : undefined
           const wireBody = converted?.body ?? targetPayload
-          const normalizedBody = normalizeCommandCodeRequest(
-            normalizeMiniMaxRequest(wireBody, targetModel, targetRoute),
-            account.provider,
-            targetRoute
-          )
+          const budget = (value: Wire) =>
+            Object.fromEntries(
+              [
+                'max_tokens',
+                'max_completion_tokens',
+                'max_output_tokens',
+                'thinking',
+                'reasoning',
+                'reasoning_effort'
+              ].flatMap((key) => (key in value ? [[key, value[key]]] : []))
+            )
+          const limitDecision = {
+            ...metadata?.resolution,
+            effectiveLimits: metadata?.limit ?? null,
+            catalogUpdatedAt: this.getRequestPricing().value.modelPriceCatalog.updatedAt,
+            catalogError: this.getRequestPricing().value.modelPriceCatalog.error,
+            handler: account.provider === 'codex' ? 'codex-adapter' : 'normalizeModelRequestLimits',
+            before: requestShape(budget(wireBody))
+          }
+          diagnosticAttempt.limitDecision = limitDecision
+          diagnosticAttempt.convertedRequest = requestShape(wireBody)
+          const normalizedBody =
+            account.provider === 'codex'
+              ? wireBody // Codex strips output budgets in its provider-specific adapter.
+              : normalizeModelRequestLimits(
+                  normalizeCommandCodeRequest(
+                    normalizeMiniMaxRequest(wireBody, targetModel, targetRoute),
+                    account.provider,
+                    targetRoute
+                  ),
+                  targetRoute,
+                  metadata?.limit
+                )
+          const forwardedBody =
+            account.provider === 'codex' ? codexRequest(wireBody) : normalizedBody
+          Object.assign(limitDecision, {
+            after: requestShape(budget(forwardedBody)),
+            changed: JSON.stringify(budget(wireBody)) !== JSON.stringify(budget(forwardedBody))
+          })
           const requestBody =
             account.provider === 'codex'
-              ? Buffer.from(JSON.stringify(codexRequest(wireBody)))
+              ? Buffer.from(JSON.stringify(forwardedBody))
               : converted || normalizedBody !== wireBody || targetPayload !== payload
                 ? Buffer.from(JSON.stringify(normalizedBody))
                 : body
@@ -918,6 +1022,15 @@ export class Gateway {
           if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           upstreamRoute = targetRoute
           upstreamModel = targetModel
+          Object.assign(diagnosticAttempt, {
+            upstreamModel,
+            upstreamRoute,
+            endpoint: diagnosticEndpoint(
+              upstreamUrl(account.region, account.provider, targetRoute, account.baseUrl)
+            ),
+            headers: diagnosticHeaders(headers)
+          })
+          diagnostics.request(forwardedBody, true)
           const upstream = await this.request(
             `${upstreamUrl(account.region, account.provider, targetRoute, account.baseUrl)}${url.search}`,
             {
@@ -929,6 +1042,7 @@ export class Gateway {
             }
           )
           upstreamRequestId = null
+          diagnostics.response(upstream)
           for (const name of [
             'x-msh-request-id',
             'x-request-id',
@@ -950,10 +1064,15 @@ export class Gateway {
               settings.cooldownSeconds,
               upstream.headers.get('retry-after')
             )
-            await upstream.body?.cancel()
+            await diagnostics.rejected(upstream, attempts)
             continue
           }
           if (upstream.status >= 300 && upstream.status < 400) {
+            diagnostics.error(
+              { message: '上游返回重定向，网关拒绝跟随' },
+              attempts,
+              upstream.status
+            )
             await upstream.body?.cancel()
             this.scheduler.failure(account.id, 502, settings.cooldownSeconds)
             continue
@@ -1009,9 +1128,17 @@ export class Gateway {
             let streamInspectable = true
             if (upstream.ok && streaming) streamStartedAt = attemptStartedTick
             const flows = this.liveFlows
+            const errorsBeforeBody = diagnostics.log.errors.length
+            const errorChunks: Buffer[] = []
+            let errorBytes = 0
             const activity = new Transform({
               transform(chunk, _encoding, callback) {
                 if (flowId && upstream.ok) flows.activity(flowId, chunk.length)
+                if (!upstream.ok) {
+                  if (errorBytes < 262144)
+                    errorChunks.push(Buffer.from(chunk).subarray(0, 262144 - errorBytes))
+                  errorBytes += chunk.length
+                }
                 callback(null, chunk)
               }
             })
@@ -1041,7 +1168,8 @@ export class Gateway {
                 if (state === 'complete') streamComplete = true
                 else if (state === 'unknown') streamInspectable = false
                 else interruption ??= 'upstream_error'
-              }
+              },
+              (error) => diagnostics.error(error, attempts, upstream.status)
             )
             if (converted) {
               const convert = async function* (chunks: AsyncIterable<Buffer>) {
@@ -1098,6 +1226,13 @@ export class Gateway {
               })
               await pipeline(source, activity, ids, observer, res, { signal: controller.signal })
             } else await pipeline(source, activity, ids, res, { signal: controller.signal })
+            if (!upstream.ok && diagnostics.log.errors.length === errorsBeforeBody)
+              diagnostics.errorBody(
+                Buffer.concat(errorChunks).toString('utf8'),
+                attempts,
+                upstream.status,
+                errorBytes > 262144
+              )
             if (upstream.ok && streaming && streamInspectable && !streamComplete)
               interruption ??= 'upstream_disconnect'
           } else {
@@ -1112,6 +1247,7 @@ export class Gateway {
           else this.scheduler.failure(account.id, upstream.status, settings.cooldownSeconds)
           return
         } catch (error) {
+          diagnostics.error(error, attempts)
           if (error instanceof ProtocolError && error.status === 400) throw error
           // 本地总超时、客户端取消和网关退出不代表账号故障。
           if (!controller.signal.aborted)
@@ -1129,6 +1265,7 @@ export class Gateway {
             return
           }
         } finally {
+          diagnosticAttempt.durationMs = Date.now() - attemptStarted
           if (streamStartedAt !== null) {
             streamDurationMs = Math.max(0, Math.round(performance.now() - streamStartedAt))
             streamStartedAt = null
@@ -1146,6 +1283,7 @@ export class Gateway {
         : error instanceof HttpError || error instanceof ProtocolError
           ? error.status
           : 500
+      diagnostics.error(error, attempts, finalStatus)
       jsonError(
         res,
         finalStatus,
@@ -1195,7 +1333,13 @@ export class Gateway {
           reasoningEffort,
           durationMs: Date.now() - started
         }
-        this.recordRequest(record)
+        if (isFailedRequest(record) && !diagnostics.log.errors.length)
+          diagnostics.error(
+            { message: interruption ?? `HTTP ${record.status}` },
+            attempts,
+            record.status
+          )
+        this.recordRequest(record, diagnostics.log)
       }
     }
   }

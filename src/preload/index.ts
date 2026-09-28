@@ -61,6 +61,7 @@ const api: HelperApi = {
   saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   getGateway: createGatewayReader((version) => ipcRenderer.invoke(IPC.gatewayGet, version)),
   getRequestHistory: (before) => ipcRenderer.invoke(IPC.requestHistory, before),
+  reportRequestIssue: (id) => ipcRenderer.invoke(IPC.requestReportIssue, id),
   getQuotaCycles: (query) => ipcRenderer.invoke(IPC.quotaCycles, query),
   setQuotaCycleExcluded: (input) => ipcRenderer.invoke(IPC.quotaCycleExclude, input),
   exportUsageReceipt: (input) => ipcRenderer.invoke(IPC.receiptExport, input),

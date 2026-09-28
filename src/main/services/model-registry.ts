@@ -1,6 +1,6 @@
 import type { CatalogPrice, ModelPrice, Provider } from '../../shared/contracts'
 import { mergeRegistryCapabilities } from './registry-capabilities'
-import { createCatalogMatcher } from '../../shared/catalog-match'
+import { createModelMetadataResolver } from '../../shared/model-metadata'
 import { accountSupportsModel, exposedModels, mappedModel } from '../../shared/model-mapping'
 
 type RegistryAccount = {
@@ -31,10 +31,7 @@ export function registryModels(
   entries: CatalogPrice[],
   prices: ModelPrice[]
 ) {
-  const match = createCatalogMatcher(entries)
-  const catalog = new Map(
-    entries.map((entry) => [JSON.stringify([entry.provider, entry.model]), entry])
-  )
+  const resolve = createModelMetadataResolver(entries, prices)
   const models = [...new Set(accounts.flatMap(exposedModels))]
   return Object.fromEntries(
     models.map((id) => {
@@ -43,13 +40,7 @@ export function registryModels(
         .map((account) => {
           const provider = account.provider ?? 'kimi'
           const upstreamModel = mappedModel(account, id)
-          const mapping = prices.find(
-            (price) => price.provider === provider && price.model === upstreamModel
-          )?.catalogMatch
-          const entry = mapping
-            ? catalog.get(JSON.stringify([mapping.provider, mapping.model]))
-            : match(upstreamModel, provider)
-          return entry
+          return resolve(upstreamModel, provider)
         })
       const matches = candidates.filter((entry) => entry !== undefined)
       const capabilities = mergeRegistryCapabilities(candidates.map((entry) => entry?.capabilities))

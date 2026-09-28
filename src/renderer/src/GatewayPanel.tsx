@@ -1,6 +1,8 @@
 import { startVisiblePolling } from './visible-polling'
+import { canReportRequest } from '../../shared/request-failure'
 import { RollingNumber } from './RollingNumber'
 import { autoMatchCatalog } from '../../shared/catalog-match'
+import { createModelMetadataResolver } from '../../shared/model-metadata'
 import { hasQuotaDisplay, hasQuotaWindow } from '../../shared/quota-display'
 import { requiresKimiUserAgent } from '../../shared/kimi-client-policy'
 import codexLogo from './assets/models/openai.svg'
@@ -26,6 +28,7 @@ import { KimiDesktopSettings } from './KimiDesktopSettings'
 import { createPortal } from 'react-dom'
 import {
   Globe,
+  Bug,
   FlaskConical,
   CircleHelp,
   List,
@@ -901,6 +904,25 @@ export function GatewayPanel({
   const [historyCursors, setHistoryCursors] = useState<(number | undefined)[]>([undefined])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const [reportingRequest, setReportingRequest] = useState<string>()
+  const [confirmReportRequest, setConfirmReportRequest] = useState<string>()
+  const [reportNotice, setReportNotice] = useState('')
+  const reportRequest = async (id: string) => {
+    setReportingRequest(id)
+    setReportNotice('')
+    try {
+      const { copied } = await api.reportRequestIssue(id)
+      setReportNotice(
+        copied
+          ? '已打开 GitHub Issue。完整诊断报告已复制，请全选 Issue 正文并粘贴后提交。'
+          : '已打开 GitHub Issue 页面并填入诊断信息（原始错误与脱敏请求），请检查后提交。'
+      )
+    } catch (error) {
+      setReportNotice(errorText(error))
+    } finally {
+      setReportingRequest(undefined)
+    }
+  }
   const costCalculator = useMemo(
     () =>
       snapshot && page === 'settings' && settingsSection === 'accounts' && tab === 'activity'
@@ -1351,7 +1373,7 @@ export function GatewayPanel({
                     [
                       ['accounts', '账号池', Users],
                       ['activity', '请求记录', Activity],
-                      ['pricing', '费用管理', Coins]
+                      ['pricing', '模型管理', Coins]
                     ] as const
                   ).map(([id, name, Icon]) => (
                     <button
@@ -1671,7 +1693,8 @@ export function GatewayPanel({
                       <div>
                         <h2>请求记录</h2>
                         <p className="muted">
-                          仅在本机保留最近 90 天的记录，每页 10 条；不记录提示词、回复或密钥。
+                          请求摘要保留 90 天，每页 10 条；错误日志保留最近 300 条。账号、分组、模型
+                          ID 和 error 原样保留，仅用户敏感字段脱敏。
                         </p>
                       </div>
                       <span className="badge">
@@ -1681,6 +1704,11 @@ export function GatewayPanel({
                     {historyError && (
                       <p className="form-error" role="alert">
                         {historyError}
+                      </p>
+                    )}
+                    {reportNotice && (
+                      <p role="status" className="muted request-report-notice">
+                        {reportNotice}
                       </p>
                     )}
                     {!(history?.records.length ?? snapshot.requests.length) ? (
@@ -1751,6 +1779,18 @@ export function GatewayPanel({
                                   >
                                     {r.status}
                                   </span>
+                                  {canReportRequest(r) && (
+                                    <button
+                                      className="icon-button request-report-button"
+                                      aria-label={`上报 Issue：${r.status} ${r.model || '请求'}`}
+                                      title="上报 Issue（保留账号、分组、模型 ID 和原始错误，请求正文脱敏）"
+                                      disabled={!!reportingRequest}
+                                      onClick={() => setConfirmReportRequest(r.id)}
+                                    >
+                                      <Bug size={14} />
+                                      <span>{reportingRequest === r.id ? '打开中…' : '上报'}</span>
+                                    </button>
+                                  )}
                                 </td>
                                 <td>
                                   <RequestLatency record={r} />
@@ -1992,6 +2032,34 @@ export function GatewayPanel({
               {error}
             </p>
           )}
+        </Modal>
+      )}
+      {confirmReportRequest && (
+        <Modal title="确认上报请求错误" close={() => setConfirmReportRequest(undefined)}>
+          <p>如果您怀疑此次请求错误与本网关有关，请继续上报。</p>
+          <p>相同的错误请尽量不要在短时间内重复上报。</p>
+          <p className="muted">开发者通常会在 3 天内维护处理，如遇节假日可能会延长，请耐心等待。</p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => setConfirmReportRequest(undefined)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              disabled={!!reportingRequest}
+              onClick={() => {
+                const id = confirmReportRequest
+                setConfirmReportRequest(undefined)
+                void reportRequest(id)
+              }}
+            >
+              继续上报
+            </button>
+          </div>
         </Modal>
       )}
       {deleting && (
@@ -2978,6 +3046,10 @@ function ModelPricing({
   }, [])
   const catalog = snapshot.modelPriceCatalog
   const fallbackFor = useMemo(() => createModelPriceMatcher(catalog), [catalog])
+  const metadataFor = useMemo(
+    () => createModelMetadataResolver(catalog?.entries ?? [], snapshot.modelPrices ?? []),
+    [catalog, snapshot.modelPrices]
+  )
   const models = new Map<string, ModelPrice>()
   for (const account of snapshot.accounts) {
     const provider = account.provider ?? 'kimi'
@@ -3010,9 +3082,9 @@ function ModelPricing({
     <>
       <div className="section-toolbar pricing-toolbar">
         <div>
-          <strong>模型单价</strong>
+          <strong>模型价格与限制</strong>
           <p className="muted">
-            每百万 token · 手动值优先，留空使用 API 默认值；没有价格时按 0 计费。
+            单价按每百万 token 计算；价格与 token 限制均支持手动覆盖，留空使用目录默认值。
           </p>
         </div>
         <div className="toolbar">
@@ -3024,7 +3096,7 @@ function ModelPricing({
           />
           <button className="button" disabled={refreshing} onClick={() => void refresh(true)}>
             <RotateCcw size={14} />
-            {refreshing ? '正在获取…' : '刷新默认价格'}
+            {refreshing ? '正在获取…' : '刷新默认数据'}
           </button>
         </div>
       </div>
@@ -3065,12 +3137,14 @@ function ModelPricing({
                 {priceFields.map(([key, label]) => (
                   <th key={key}>{label}</th>
                 ))}
+                <th>Token 限制</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((price) => {
                 const fallback = fallbackFor(price)
+                const limits = metadataFor(price.model, price.provider)?.limit
                 return (
                   <tr key={JSON.stringify([price.provider, price.model])}>
                     <td>{providerNames[price.provider]}</td>
@@ -3103,6 +3177,15 @@ function ModelPricing({
                       )
                     })}
                     <td>
+                      {(['context', 'output'] as const).map((key) => (
+                        <small className="pricing-source" key={key}>
+                          {key === 'context' ? '上下文' : '输出'}：
+                          {limits?.[key]?.toLocaleString() ?? '未知'}
+                          {limits?.[key] ? (price.limits?.[key] ? ' · 手动' : ' · 目录') : ''}
+                        </small>
+                      ))}
+                    </td>
+                    <td>
                       <button
                         className="text-button"
                         aria-label={`编辑 ${providerNames[price.provider]} ${price.model} 单价`}
@@ -3133,7 +3216,7 @@ function ModelPricing({
           saved={(data) => {
             saved(data)
             setEditing(undefined)
-            setNotice('模型单价已保存')
+            setNotice('模型价格与限制已保存')
           }}
         />
       )}
@@ -3157,6 +3240,17 @@ function ModelPriceEditor({
   const [searchOpen, setSearchOpen] = useState(false)
   const automaticMatch = autoMatchCatalog(catalog?.entries ?? [], input.model, input.provider)
   const fallback = matchedModelPrice({ ...input, catalogMatch }, catalog)
+  const defaultLimits = useMemo(
+    () =>
+      createModelMetadataResolver(catalog?.entries ?? [], [
+        { ...input, catalogMatch, limits: undefined }
+      ])(input.model, input.provider)?.limit,
+    [catalog, input, catalogMatch]
+  )
+  const [limits, setLimits] = useState({
+    context: input.limits?.context?.toString() ?? '',
+    output: input.limits?.output?.toString() ?? ''
+  })
   const results = searchOpen ? searchCatalogPrices(catalog?.entries ?? [], query) : []
   const [currency, setCurrency] = useState(input.currency)
   const [amounts, setAmounts] = useState(() =>
@@ -3177,7 +3271,20 @@ function ModelPriceEditor({
       const values = Object.fromEntries(
         priceFields.map(([key]) => [key, amounts[key].trim() === '' ? null : Number(amounts[key])])
       ) as Pick<ModelPrice, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>
-      saved(await api.saveModelPrice({ ...input, ...values, currency, catalogMatch }))
+      const tokenLimits = Object.fromEntries(
+        (['context', 'output'] as const)
+          .filter((key) => limits[key].trim() !== '')
+          .map((key) => [key, Number(limits[key])])
+      )
+      saved(
+        await api.saveModelPrice({
+          ...input,
+          ...values,
+          currency,
+          catalogMatch,
+          limits: tokenLimits
+        })
+      )
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -3187,7 +3294,7 @@ function ModelPriceEditor({
   }
   return (
     <Modal
-      title="编辑模型单价"
+      title="编辑模型价格与限制"
       close={() => {
         if (!lock.current) close()
       }}
@@ -3201,7 +3308,7 @@ function ModelPriceEditor({
         <fieldset disabled={busy}>
           <section className="price-match-picker">
             <div className="model-protocols-heading">
-              <strong>匹配 Models.dev 价格</strong>
+              <strong>匹配 Models.dev 模型</strong>
               <button
                 type="button"
                 className="text-button"
@@ -3269,6 +3376,10 @@ function ModelPriceEditor({
                                 .join(' · ')}
                               {entry.tiered ? ' · 基础档价格' : ''}
                             </small>
+                            <small>
+                              上下文 {entry.limit?.context?.toLocaleString() ?? '未知'} · 最大输出{' '}
+                              {entry.limit?.output?.toLocaleString() ?? '未知'} token
+                            </small>
                           </div>
                           <button
                             type="button"
@@ -3281,7 +3392,7 @@ function ModelPriceEditor({
                               setSearchOpen(false)
                             }}
                           >
-                            应用价格
+                            应用模型
                           </button>
                         </div>
                       ))}
@@ -3289,10 +3400,49 @@ function ModelPriceEditor({
                   </>
                 )}
                 <p className="muted">
-                  应用后将清空当前手动值，使用所选模型的默认价格并跟随更新；点击「保存单价」后生效。
+                  应用后清空手动价格，跟随所选模型的目录数据；已填写的 token
+                  限制仍优先。点击「保存配置」后生效。
                 </p>
               </>
             )}
+          </section>
+          <section className="price-match-picker" aria-label="Token 限制">
+            <div className="model-protocols-heading">
+              <strong>Token 限制</strong>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setLimits({ context: '', output: '' })}
+              >
+                恢复目录限制
+              </button>
+            </div>
+            <div className="form-grid">
+              {(['context', 'output'] as const).map((key) => (
+                <Field
+                  key={key}
+                  label={key === 'context' ? '上下文窗口（token）' : '最大输出（token）'}
+                  hint={
+                    defaultLimits?.[key]
+                      ? `留空使用目录默认：${defaultLimits[key]!.toLocaleString()} token`
+                      : '目录未提供，可手动填写正整数'
+                  }
+                >
+                  <input
+                    type="number"
+                    min="1"
+                    max={Number.MAX_SAFE_INTEGER}
+                    step="1"
+                    placeholder={defaultLimits?.[key]?.toString() ?? '未知'}
+                    value={limits[key]}
+                    onChange={(e) => setLimits((old) => ({ ...old, [key]: e.target.value }))}
+                  />
+                </Field>
+              ))}
+            </div>
+            <p className="muted">
+              优先使用客户端传入的输出参数；未传入时补充此处的有效值，无有效值则不处理。上下文包含输入与输出，历史压缩仍由客户端处理。
+            </p>
           </section>
           <Field label="币种" hint="切换币种只修改标记，不会换算已填单价。">
             <select
@@ -3352,7 +3502,7 @@ function ModelPriceEditor({
             取消
           </button>
           <button className="button primary" disabled={busy}>
-            {busy ? '正在保存…' : '保存单价'}
+            {busy ? '正在保存…' : '保存配置'}
           </button>
         </div>
       </form>

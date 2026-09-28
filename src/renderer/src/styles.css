@@ -951,6 +951,16 @@ td small {
 .request-history-table {
   min-width: 1040px;
 }
+.request-report-button {
+  display: flex;
+  margin-top: 6px;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.request-report-notice {
+  margin: 12px 22px;
+}
 .request-model-badge {
   display: inline-flex;
   align-items: center;

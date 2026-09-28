@@ -75,6 +75,7 @@ export interface HelperApi {
   saveSettings(settings: Partial<AppSettings>): Promise<AppSettings>
   getGateway(): Promise<GatewaySnapshot>
   getRequestHistory(before?: number): Promise<RequestHistoryPage>
+  reportRequestIssue(id: string): Promise<{ copied: boolean }>
   getQuotaCycles(
     query: import('./quota-cost').QuotaCycleQuery
   ): Promise<import('./quota-cost').QuotaCostCycle[]>
@@ -311,7 +312,13 @@ export interface RequestRecord {
   durationMs: number
   firstTokenMs: number | null
 }
+export interface ModelTokenLimits {
+  context?: number
+  output?: number
+}
 export interface ModelPrice {
+  /** 手动 token 限制；未设置的字段使用模型目录。 */
+  limits?: ModelTokenLimits
   catalogMatch?: { provider: string; model: string }
   provider: Provider
   model: string
@@ -337,7 +344,7 @@ export interface CatalogPrice extends Omit<DefaultModelPrice, 'provider'> {
   provider: string
   name: string
   providerName: string
-  limit?: { context?: number; output?: number }
+  limit?: ModelTokenLimits
   capabilities?: RegistryModelCapabilities
 }
 export interface ModelPriceCatalogSnapshot {
@@ -402,6 +409,7 @@ export const IPC = {
   settingsSave: 'settings:save',
   gatewayGet: 'gateway:get',
   requestHistory: 'gateway:request-history',
+  requestReportIssue: 'gateway:request-report-issue',
   quotaCycles: 'gateway:quota-cycles',
   quotaCycleExclude: 'gateway:quota-cycle-exclude',
   usageStats: 'gateway:usage-stats',

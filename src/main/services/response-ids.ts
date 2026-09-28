@@ -20,7 +20,8 @@ export class ResponseIdsObserver extends Transform {
     private readonly onId: (id: string) => void,
     private readonly protocol?: UsageProtocol,
     private readonly onUsage?: (usage: Partial<TokenUsage>) => void,
-    private readonly onStreamState?: (state: 'complete' | 'error' | 'unknown') => void
+    private readonly onStreamState?: (state: 'complete' | 'error' | 'unknown') => void,
+    private readonly onError?: (error: unknown) => void
   ) {
     super()
   }
@@ -31,6 +32,14 @@ export class ResponseIdsObserver extends Transform {
     }
     try {
       const root = JSON.parse(data)
+      if (
+        root?.error ||
+        root?.response?.error ||
+        generationFailure(root) ||
+        ['error', 'response.failed'].includes(root?.type ?? this.event) ||
+        (!this.streaming && typeof root?.message === 'string')
+      )
+        this.onError?.(generationFailure(root) ? { code: generationFailure(root) } : root)
       if (generationFailure(root)) this.onStreamState?.('error')
       if (this.streaming) {
         const type = root?.type ?? this.event

@@ -584,6 +584,19 @@ export function validateModelPrice(value: unknown): ModelPrice {
   const v = object(value)
   if (!(PROVIDERS as readonly unknown[]).includes(v.provider)) throw new Error('模型供应商无效')
   if (v.currency !== 'CNY' && v.currency !== 'USD') throw new Error('价格币种无效')
+  const limits: NonNullable<ModelPrice['limits']> = {}
+  if (v.limits != null) {
+    const raw = object(v.limits)
+    for (const key of ['context', 'output'] as const) {
+      const size = raw[key]
+      if (size == null) continue
+      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0)
+        throw new Error('Token 限制须为正整数，或留空使用目录默认值')
+      limits[key] = size
+    }
+    if (limits.context && limits.output && limits.output > limits.context)
+      throw new Error('最大输出 token 不能超过上下文窗口')
+  }
   const price = (key: string): number | null => {
     const amount = v[key]
     if (amount === null) return null
@@ -597,6 +610,7 @@ export function validateModelPrice(value: unknown): ModelPrice {
     return amount
   }
   return {
+    ...(Object.keys(limits).length ? { limits } : {}),
     ...(v.catalogMatch != null
       ? {
           catalogMatch: {

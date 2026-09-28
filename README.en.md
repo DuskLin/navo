@@ -71,6 +71,10 @@ All providers support **Edit account → Available models → Add model manually
 
 Each failover account resolves the original client ID independently. Protocol selection, registry metadata and cost estimates use the target model. `/v1/models` and `/api.json` advertise callable exact aliases, excluding wildcard patterns. Request history shows both IDs, while upstream responses retain their actual model name.
 
+Output budgets use this priority: client value, gateway model configuration, then omission. Explicit `max_tokens`, `max_completion_tokens`, and `max_output_tokens` values are preserved even above configured limits. Only omitted budgets are filled for the target protocol, using the manual output value or matched catalog default. Without a known output value, no budget is added, including during protocol conversion; the fixed 8192 Messages default has been removed. Context size is not used as an output default, and explicit thinking budgets remain unchanged. Aliases and failover use the configuration of each actual target model.
+
+`/v1/models` also exposes known `limit.context`, `limit.output`, `context_length`, and `max_output_tokens` fields for clients that support them. Edit context and output limits in model management; manual values take precedence and apply immediately after saving, while blank fields follow the catalog. Limits can be reset independently of prices. Refresh or associate the model catalog, or enter limits manually when metadata is missing; unknown limits are not guessed. Context size is advertised as model metadata and does not rewrite request budgets: the gateway does not trim history or count input tokens precisely, so clients must still manage combined input/output context usage. The Codex OAuth adapter continues to remove unsupported output budget fields.
+
 ## Quick start
 
 ### Install or run from source
@@ -196,6 +200,8 @@ Portrait mode displays two columns; landscape mode expands to three. Cards in ea
 > These are actual web UI screenshots captured at 2× resolution with emulated phone/iPad viewports and fixed demo data. They contain no real accounts, access codes, or public URLs. They are not photos of physical devices or a native iOS app. In normal use, the dashboard displays live data synchronized by the desktop app.
 
 ### Live gateway dashboard
+
+Failed requests other than HTTP 499 have a report button in request history. It opens a GitHub Issue prefilled with redacted diagnostics for review and submission. Account and group names, client and upstream model IDs, request IDs, and complete error objects are preserved unchanged. Each attempt records its account, endpoint, protocol, forwarded parameters, response status, and timing. Request and response fields are preserved by default, including extension parameters, tool definitions, and non-sensitive headers. Only sensitive fields such as conversation content, credentials, personal data, and session identifiers are redacted. Reports also capture the model-limit catalog match and update time, manual overrides, effective limits, and budgets before and after normalization. Oversized reports are copied in full for pasting into the Issue, rather than truncated. Logs are limited to the latest 300 failures; the existing 90-day request summaries remain available. Reports for older requests explicitly indicate when detailed logs are unavailable.
 
 Switch between **额度** (Quotas) and **调度** (Live flow) in the title bar. This looping SVG was converted from an actual screen recording:
 

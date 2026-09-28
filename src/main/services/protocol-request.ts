@@ -489,7 +489,8 @@ function toolsFrom(body: Wire, protocol: UsageProtocol, context: BridgeContext):
 export function convertRequest(
   body: Wire,
   source: UsageProtocol,
-  target: UsageProtocol
+  target: UsageProtocol,
+  defaultMaxTokens?: number
 ): { body: Wire; context: BridgeContext } {
   const context: BridgeContext = { model: required(body.model, 'model'), tools: new Map() }
   if (source === target) return { body, context }
@@ -508,11 +509,12 @@ export function convertRequest(
     delete converted.temperature
     delete converted.top_p
   }
-  const max = body.max_output_tokens ?? body.max_completion_tokens ?? body.max_tokens
+  const budgetKeys = ['max_output_tokens', 'max_completion_tokens', 'max_tokens']
+  const suppliedBudget = budgetKeys.find((key) => Object.hasOwn(body, key))
+  const max = suppliedBudget ? body[suppliedBudget] : defaultMaxTokens
   if (max !== undefined && (!Number.isSafeInteger(max) || max <= 0))
     throw new ProtocolError('输出 token 上限必须是正整数')
-  if (target === 'messages') converted.max_tokens = max ?? 8192
-  else if (max !== undefined)
+  if (max !== undefined)
     converted[target === 'responses' ? 'max_output_tokens' : 'max_tokens'] = max
   const stop = body.stop_sequences ?? body.stop
   if (stop !== undefined && target !== 'responses')

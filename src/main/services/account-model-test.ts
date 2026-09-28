@@ -14,6 +14,8 @@ import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
 import type { Credential } from './gateway-store'
 import { codexHeaders, codexRequest } from './codex-auth'
 import { obj, str, list, type Wire } from './protocol-request'
+import { RequestDiagnostics, diagnosticHeaders, diagnosticEndpoint } from './request-diagnostics'
+import type { RequestFailureLog } from '../../shared/request-failure'
 
 export type ModelTestTelemetry = Pick<
   RequestRecord,
@@ -31,7 +33,7 @@ export async function testAccountModel(
   input: AccountModelTest,
   credential: Credential,
   request: typeof fetch,
-  onComplete?: (telemetry: ModelTestTelemetry) => void
+  onComplete?: (telemetry: ModelTestTelemetry, diagnostic: RequestFailureLog) => void
 ): Promise<AccountModelTestResult> {
   const started = performance.now()
   const telemetry: ModelTestTelemetry = {
@@ -55,6 +57,27 @@ export async function testAccountModel(
           stream: true
         }
   if (input.protocol === 'chat-completions') body.stream_options = { include_usage: true }
+  const diagnostics = new RequestDiagnostics()
+  diagnostics.log.context = { method: 'POST', modelTest: true, timeoutSeconds: 60 }
+  diagnostics.attempt({
+    attempt: 1,
+    provider: input.provider,
+    region: input.region,
+    model: input.model,
+    upstreamModel: input.model,
+    upstreamRoute: MODEL_PROTOCOLS.find((p) => p.value === input.protocol)!.route,
+    endpoint: diagnosticEndpoint(
+      upstreamUrl(
+        input.region,
+        input.provider,
+        MODEL_PROTOCOLS.find((p) => p.value === input.protocol)!.route,
+        input.baseUrl
+      )
+    )
+  })
+  diagnostics.request(body)
+  const forwardedBody = input.provider === 'codex' ? codexRequest(body) : body
+  diagnostics.request(forwardedBody, true)
   const headers = new Headers({
     'content-type': 'application/json',
     authorization: `Bearer ${credential.accessToken}`,
@@ -86,18 +109,25 @@ export async function testAccountModel(
       {
         method: 'POST',
         headers,
-        body: JSON.stringify(input.provider === 'codex' ? codexRequest(body) : body),
+        body: JSON.stringify(forwardedBody),
         signal: AbortSignal.timeout(60000),
         redirect: 'error'
       }
     )
     telemetry.status = response.status
+    diagnostics.log.attempts![0].headers = diagnosticHeaders(headers)
+    diagnostics.response(response)
     for (const header of ['x-request-id', 'request-id', 'x-amzn-requestid']) {
       const id = response.headers.get(header)
       if (validRequestId(id)) {
         telemetry.upstreamRequestId = id
         break
       }
+    }
+    if (!response.ok) {
+      await diagnostics.rejected(response, 1)
+      const detail = diagnostics.log.errors.at(-1)?.detail as { message?: string } | undefined
+      throw new Error(`HTTP ${response.status}：${detail?.message ?? '模型测试失败'}`)
     }
     if (!response.body) throw new Error(`HTTP ${response.status}：上游未返回响应内容`)
     const receivedAt = performance.now()
@@ -125,7 +155,8 @@ export async function testAccountModel(
       },
       (state) => {
         if (state === 'error') telemetry.interruption = 'upstream_error'
-      }
+      },
+      (error) => diagnostics.error(error, 1, response.status)
     )
     const firstToken = new FirstTokenObserver(() => {
       if (streaming) telemetry.firstTokenMs ??= Math.round(performance.now() - started)
@@ -205,6 +236,7 @@ export async function testAccountModel(
       text: redact(text)
     }
   } catch (error) {
+    diagnostics.error(error, 1, telemetry.status)
     if (telemetry.status < 400) telemetry.status = 502
     telemetry.interruption ??= 'upstream_error'
     if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)) {
@@ -215,8 +247,9 @@ export async function testAccountModel(
     throw new Error(redact(error instanceof Error ? error.message : String(error)))
   } finally {
     telemetry.durationMs = Math.round(performance.now() - started)
+    diagnostics.log.attempts![0].durationMs = telemetry.durationMs
     if (streamStarted !== null)
       telemetry.streamDurationMs = Math.round(performance.now() - streamStarted)
-    onComplete?.(telemetry)
+    onComplete?.(telemetry, diagnostics.log)
   }
 }
