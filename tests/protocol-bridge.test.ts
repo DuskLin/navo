@@ -275,6 +275,49 @@ for (const source of protocols)
       })
     }
 
+for (const source of ['chat-completions', 'messages'] as const)
+  test(`request ${source} → responses explicitly types messages and preserves tool item types`, () => {
+    const original = request(source)
+    const media = [
+      { type: 'text', text: 'file result' },
+      { type: 'image_url', image_url: { url: inputImage } }
+    ]
+    if (source === 'chat-completions') {
+      original.messages.splice(1, 0, { role: 'developer', content: 'developer instructions' })
+      original.messages.find((m: Wire) => m.role === 'tool').content = media
+    } else {
+      original.messages[2].content[0].content = media
+    }
+    const snapshot = structuredClone(original)
+    const { body } = convertRequest(original, source, 'responses')
+    const messages = body.input.filter((item: Wire) => item.role)
+    assert.deepEqual(
+      [...new Set(messages.map((item: Wire) => item.role))],
+      source === 'chat-completions'
+        ? ['system', 'developer', 'user', 'assistant']
+        : ['system', 'user', 'assistant']
+    )
+    for (const message of messages) assert.equal(message.type, 'message')
+    const callIndex = body.input.findIndex((item: Wire) => item.type === 'function_call')
+    assert.deepEqual(body.input[callIndex], {
+      type: 'function_call',
+      call_id: 'call_1',
+      name: 'read_file',
+      arguments: '{"path":"a.ts"}'
+    })
+    assert.deepEqual(body.input[callIndex + 1], {
+      type: 'function_call_output',
+      call_id: 'call_1',
+      output: 'file result'
+    })
+    assert.deepEqual(body.input[callIndex + 2], {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_image', image_url: inputImage }]
+    })
+    assert.deepEqual(original, snapshot)
+  })
+
 const rawUsage = {
   input_tokens: 120,
   output_tokens: 6,

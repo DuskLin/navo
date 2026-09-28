@@ -387,14 +387,19 @@ function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
           output: (m.error ? 'Tool error: ' : '') + textOf(m.content)
         })
         const media = m.content.filter((p) => p.type !== 'text')
-        if (media.length) input.push({ role: 'user', content: contentFor(media, protocol) })
+        if (media.length)
+          input.push({ type: 'message', role: 'user', content: contentFor(media, protocol) })
       } else {
         const content: Part[] =
           m.role === 'assistant' && m.reasoning
             ? [{ type: 'text', text: `<thinking>${m.reasoning}</thinking>` }, ...m.content]
             : m.content
         if (content.length)
-          input.push({ role: m.role, content: contentFor(content, protocol, m.role) })
+          input.push({
+            type: 'message',
+            role: m.role,
+            content: contentFor(content, protocol, m.role)
+          })
         for (const c of m.calls ?? [])
           input.push({ type: 'function_call', call_id: c.id, name: c.name, arguments: c.arguments })
       }
