@@ -162,6 +162,9 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
       : {}),
     region: v.region as AccountInput['region'],
     enabled: boolean(v.enabled),
+    ...(v.useModelOutputLimit !== undefined
+      ? { useModelOutputLimit: boolean(v.useModelOutputLimit) }
+      : {}),
     ...(v.concurrencyOverride !== undefined
       ? {
           concurrencyOverride:
@@ -499,6 +502,10 @@ export class GatewayStore {
         input.modelMappings ?? (old?.provider === input.provider ? old?.modelMappings : undefined)
       const account: StoredAccount = {
         ...input,
+        useModelOutputLimit:
+          input.useModelOutputLimit ??
+          (old?.provider === input.provider ? old?.useModelOutputLimit : undefined) ??
+          false,
         ...(input.provider === 'kimi' && input.kind === 'oauth'
           ? { kimiOAuthOnly: input.kimiOAuthOnly ?? old?.kimiOAuthOnly ?? true }
           : {}),

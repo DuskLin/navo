@@ -934,13 +934,14 @@ export class Gateway {
           const targetPayload = targetModel === model ? payload : { ...payload, model: targetModel }
           const targetRoute = modelUpstreamRoute(account, targetModel, route)
           const metadata = this.modelMetadata(targetModel, provider)
+          const useModelOutputLimit = account.useModelOutputLimit === true && provider !== 'codex'
           const converted =
             targetRoute !== route || (account.provider === 'codex' && payload.stream !== true)
               ? convertRequest(
                   targetPayload,
                   routeProtocol(route),
                   routeProtocol(targetRoute),
-                  metadata?.limit?.output
+                  useModelOutputLimit ? metadata?.limit?.output : undefined
                 )
               : undefined
           const wireBody = converted?.body ?? targetPayload
@@ -956,6 +957,7 @@ export class Gateway {
               ].flatMap((key) => (key in value ? [[key, value[key]]] : []))
             )
           const limitDecision = {
+            enabled: useModelOutputLimit,
             ...metadata?.resolution,
             effectiveLimits: metadata?.limit ?? null,
             catalogUpdatedAt: this.getRequestPricing().value.modelPriceCatalog.updatedAt,
@@ -975,7 +977,8 @@ export class Gateway {
                     targetRoute
                   ),
                   targetRoute,
-                  metadata?.limit
+                  metadata?.limit,
+                  useModelOutputLimit
                 )
           const forwardedBody =
             account.provider === 'codex' ? codexRequest(wireBody) : normalizedBody

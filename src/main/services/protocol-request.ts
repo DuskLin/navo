@@ -490,7 +490,7 @@ export function convertRequest(
   body: Wire,
   source: UsageProtocol,
   target: UsageProtocol,
-  defaultMaxTokens?: number
+  outputOverride?: number
 ): { body: Wire; context: BridgeContext } {
   const context: BridgeContext = { model: required(body.model, 'model'), tools: new Map() }
   if (source === target) return { body, context }
@@ -511,7 +511,7 @@ export function convertRequest(
   }
   const budgetKeys = ['max_output_tokens', 'max_completion_tokens', 'max_tokens']
   const suppliedBudget = budgetKeys.find((key) => Object.hasOwn(body, key))
-  const max = suppliedBudget ? body[suppliedBudget] : defaultMaxTokens
+  const max = outputOverride ?? (suppliedBudget ? body[suppliedBudget] : undefined)
   if (max !== undefined && (!Number.isSafeInteger(max) || max <= 0))
     throw new ProtocolError('输出 token 上限必须是正整数')
   if (max !== undefined)

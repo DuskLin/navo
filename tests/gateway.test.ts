@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { normalizeCustomBaseUrl, upstreamUrl, type AccountInput } from '../src/shared/contracts'
 import {
   GatewayStore,
+  validateAccount,
   capabilityFields,
   type SecretCodec,
   type StoredAccount,
@@ -80,6 +81,24 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
       assert.equal(response.status, 200, await response.text())
       return calls.at(-1)!
     }
+    // Existing accounts opt out until explicitly enabled, including conversion.
+    for (const target of [undefined, ['messages'] as const]) {
+      await f.store.mutate((data) => {
+        data.accounts[0].modelProtocols = target ? { upstream: [...target] } : {}
+      })
+      const supplied = await send('/v1/responses', {
+        model: 'alias',
+        input: 'hi',
+        max_output_tokens: 978090
+      })
+      assert.equal(supplied.body.max_tokens ?? supplied.body.max_output_tokens, 978090)
+      const omitted = await send('/v1/responses', { model: 'alias', input: 'hi' })
+      assert.equal(omitted.body.max_tokens ?? omitted.body.max_output_tokens, undefined)
+    }
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = {}
+      data.accounts[0].useModelOutputLimit = true
+    })
     for (const [route, key] of [
       ['/v1/messages', 'max_tokens'],
       ['/v1/responses', 'max_output_tokens'],
@@ -93,7 +112,7 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
         input: 'hi'
       })
       assert.equal(call.body.model, 'upstream')
-      assert.equal(call.body[key], 978090)
+      assert.equal(call.body[key], output)
       const defaults = await send(route, {
         model: 'alias',
         input: 'hi',
@@ -143,7 +162,7 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
       max_output_tokens: 978090
     })
     assert.equal(converted.url.endsWith('/v1/chat/completions'), true)
-    assert.equal(converted.body.max_tokens, 978090)
+    assert.equal(converted.body.max_tokens, output)
     assert.equal(converted.body.max_output_tokens, undefined)
     output = 32768
     await gateway.pricing.refresh(true)
@@ -188,7 +207,7 @@ test('gateway applies catalog budgets after mapping/conversion and advertises mo
   }
 })
 
-test('failover recomputes output limits from the original request for each mapped target', async () => {
+test('failover honors each account opt-in and preserves the original client budget', async () => {
   const f = await storeFixture()
   const calls: Record<string, any>[] = []
   const gateway = f.createGateway(
@@ -213,7 +232,11 @@ test('failover recomputes output limits from the original request for each mappe
   try {
     for (const model of ['small', 'large'])
       await f.store.saveAccount(
-        { ...accountInput(model), modelMappings: { alias: model } },
+        {
+          ...accountInput(model),
+          useModelOutputLimit: model === 'small',
+          modelMappings: { alias: model }
+        },
         { models: [model], maxConcurrency: 20, checkedAt: Date.now(), warning: '' }
       )
     await gateway.pricing.refresh()
@@ -224,15 +247,53 @@ test('failover recomputes output limits from the original request for each mappe
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: 'alias',
+        max_tokens: 978090,
         messages: [{ role: 'user', content: 'hi' }]
       })
     })
     assert.equal(response.status, 200, await response.text())
     assert.equal(calls.length, 2)
     assert.equal(new Set(calls.map((call) => call.model)).size, 2)
-    for (const call of calls) assert.equal(call.max_tokens, call.model === 'small' ? 4096 : 8192)
+    for (const call of calls) assert.equal(call.max_tokens, call.model === 'small' ? 4096 : 978090)
     const registry = await (await fetch(reserved.url + '/api.json')).json()
     assert.equal(registry.navo.models.alias.limit.output, 4096)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('account output policy defaults off, validates, persists and can be disabled', async () => {
+  const f = await storeFixture()
+  try {
+    const id = await f.store.saveAccount(accountInput('policy'), {
+      models: ['model'],
+      maxConcurrency: 2,
+      checkedAt: Date.now(),
+      warning: ''
+    })
+    assert.equal(f.store.get().accounts[0].useModelOutputLimit, false)
+    const original = f.store.get().accounts[0]
+    for (const value of ['true', 1, null])
+      assert.throws(
+        () => validateAccount({ ...original, useModelOutputLimit: value }, f.store.get().groups),
+        /开关值/
+      )
+    await f.store.saveAccount({ ...original, useModelOutputLimit: true })
+    await f.store.saveAccount({ ...original, useModelOutputLimit: undefined, name: 'renamed' })
+    const restored = new GatewayStore(f.file, f.secrets)
+    await restored.load()
+    assert.equal(
+      restored.get().accounts.find((account) => account.id === id)?.useModelOutputLimit,
+      true
+    )
+    await restored.saveAccount({ ...restored.get().accounts[0], useModelOutputLimit: false })
+    await f.store.load()
+    assert.equal(f.store.get().accounts[0].useModelOutputLimit, false)
+    await f.store.mutate((data) => {
+      delete data.accounts[0].useModelOutputLimit
+    })
+    await restored.load()
+    assert.equal(restored.get().accounts[0].useModelOutputLimit, undefined)
   } finally {
     await f.cleanup()
   }
