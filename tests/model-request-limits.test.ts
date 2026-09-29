@@ -5,7 +5,7 @@ import { normalizeModelRequestLimits as normalize } from '../src/main/services/m
 import { createModelMetadataResolver } from '../src/shared/model-metadata'
 import { parseCatalogEntries } from '../src/main/services/model-price-catalog'
 
-test('client budgets win for every protocol, including values above gateway limits', () => {
+test('disabled accounts preserve every client budget and do not fill omitted values', () => {
   for (const [route, key] of [
     ['/v1/messages', 'max_tokens'],
     ['/v1/responses', 'max_output_tokens'],
@@ -21,43 +21,70 @@ test('client budgets win for every protocol, including values above gateway limi
   assert.equal(normalize(both, '/v1/chat/completions', { output: 500 }), both)
 })
 
-test('missing budgets use only the configured output, without changing thinking or retry inputs', () => {
+test('enabled accounts prefer configured output and preserve input when configuration is missing', () => {
   for (const [route, key] of [
     ['/v1/messages', 'max_tokens'],
     ['/v1/responses', 'max_output_tokens'],
     ['/v1/chat/completions', 'max_tokens']
   ]) {
     const body = { thinking: { type: 'enabled', budget_tokens: 500000 } }
-    const result = normalize(body, route, { output: 200, context: 100 })
+    const result = normalize(body, route, { output: 200, context: 100 }, true)
     assert.equal(result[key], 200)
+    for (const value of [50, 978090, null, 0]) {
+      const supplied = { [key]: value }
+      assert.equal(normalize(supplied, route, { output: 200 }, true)[key], 200)
+      assert.equal(normalize(supplied, route, undefined, true), supplied)
+    }
+    assert.deepEqual(normalize({}, route, { output: 200 }), {})
     assert.equal(result.thinking, body.thinking)
     assert.equal(Object.hasOwn(body, key), false)
-    assert.equal(normalize(body, route, undefined), body)
-    assert.equal(normalize(body, route, { context: 100 }), body)
+    assert.equal(normalize(body, route, undefined, true), body)
+    assert.equal(normalize(body, route, { context: 100 }, true), body)
     for (const output of [0, -1, NaN, Infinity])
-      assert.equal(normalize(body, route, { output }), body)
+      assert.equal(normalize(body, route, { output }, true), body)
   }
   const count = { messages: [] }
-  assert.equal(normalize(count, '/v1/messages/count_tokens', { output: 100 }), count)
+  assert.equal(normalize(count, '/v1/messages/count_tokens', { output: 100 }, true), count)
 })
 
-test('cross-protocol conversion respects client budgets, then gateway defaults, then omission', () => {
+test('cross-protocol conversion prefers explicit gateway overrides, then client budgets, then omission', () => {
   for (const target of ['messages', 'chat-completions'] as const) {
     const body = { model: 'test', input: 'hi', reasoning: { effort: 'high' } }
     assert.equal(
       convertRequest({ ...body, max_output_tokens: 978090 }, 'responses', target, 2000).body
         .max_tokens,
-      978090
+      2000
     )
     const fallback = convertRequest(body, 'responses', target, 2000).body
     assert.equal(fallback.max_tokens, 2000)
     if (target === 'messages') assert.ok(fallback.thinking.budget_tokens < fallback.max_tokens)
     assert.equal(convertRequest(body, 'responses', target).body.max_tokens, undefined)
-    assert.throws(
-      () => convertRequest({ ...body, max_output_tokens: null }, 'responses', target, 2000),
-      /正整数/
+    assert.equal(
+      convertRequest({ ...body, max_output_tokens: null }, 'responses', target, 2000).body
+        .max_tokens,
+      2000
+    )
+    assert.equal(
+      convertRequest({ ...body, max_output_tokens: 978090 }, 'responses', target).body.max_tokens,
+      978090
     )
   }
+})
+
+test('Chat override preserves field choice and aligns competing fields', () => {
+  assert.deepEqual(
+    normalize({ max_completion_tokens: 50 }, '/v1/chat/completions', { output: 100 }, true),
+    { max_completion_tokens: 100 }
+  )
+  assert.deepEqual(
+    normalize(
+      { max_completion_tokens: 50, max_tokens: 500 },
+      '/v1/chat/completions',
+      { output: 100 },
+      true
+    ),
+    { max_completion_tokens: 100, max_tokens: 100 }
+  )
 })
 
 test('metadata prefers provider limits over priced alternatives and honors explicit associations', () => {

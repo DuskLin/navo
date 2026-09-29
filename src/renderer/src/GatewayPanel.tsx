@@ -2245,6 +2245,7 @@ function AccountEditor({
             baseUrl: '',
             modelSource: 'automatic' as const,
             modelProtocols: {},
+            useModelOutputLimit: false,
             modelMappings: {},
             excludedModels: [],
             manualModels: []
@@ -2732,6 +2733,15 @@ function AccountEditor({
                 </p>
               )}
             </section>
+            {draft.provider !== 'codex' && (
+              <SettingsToggle
+                label="使用网关输出配置"
+                badge="测试功能"
+                hint="默认关闭。开启后优先使用「模型管理」中的最大输出（手动值优先，留空跟随目录）；未配置时保留客户端传入值。"
+                checked={draft.useModelOutputLimit === true}
+                onChange={(value) => change('useModelOutputLimit', value)}
+              />
+            )}
             <ModelMappingEditor
               rows={modelMappings}
               models={visibleModels}
@@ -3441,7 +3451,7 @@ function ModelPriceEditor({
               ))}
             </div>
             <p className="muted">
-              优先使用客户端传入的输出参数；未传入时补充此处的有效值，无有效值则不处理。上下文包含输入与输出，历史压缩仍由客户端处理。
+              此为测试功能，需在账号编辑中手动开启「使用网关输出配置」。开启后优先使用此处的有效值，无有效值则保留客户端传入值。上下文包含输入与输出，历史压缩仍由客户端处理。
             </p>
           </section>
           <Field label="币种" hint="切换币种只修改标记，不会换算已填单价。">

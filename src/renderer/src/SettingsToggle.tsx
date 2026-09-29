@@ -2,12 +2,14 @@ import { useId } from 'react'
 
 export function SettingsToggle({
   label,
+  badge,
   hint,
   checked,
   disabled,
   onChange
 }: {
   label: string
+  badge?: string
   hint: string
   checked: boolean
   disabled?: boolean
@@ -17,7 +19,15 @@ export function SettingsToggle({
   return (
     <label className="settings-toggle-row">
       <span>
-        <strong>{label}</strong>
+        <strong>
+          {label}
+          {badge && (
+            <>
+              {' '}
+              <span className="lab-badge">{badge}</span>
+            </>
+          )}
+        </strong>
         <small id={hintId}>{hint}</small>
       </span>
       <input

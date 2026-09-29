@@ -134,6 +134,8 @@ export interface AccountInput {
   kimiOAuthOnly?: boolean
   region: Region
   enabled: boolean
+  /** 默认关闭；开启后优先使用网关模型配置中的最大输出。 */
+  useModelOutputLimit?: boolean
   concurrencyOverride?: number | null
   modelProtocols?: Record<string, ModelProtocol[]>
   /** 请求模型 ID（支持末尾 *）到此账号上游模型 ID 的映射。 */
