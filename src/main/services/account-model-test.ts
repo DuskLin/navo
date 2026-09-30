@@ -13,6 +13,7 @@ import {
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
 import type { Credential } from './gateway-store'
 import { codexHeaders, codexRequest } from './codex-auth'
+import { CODEX_FALLBACK_VERSION } from './codex-version'
 import { obj, str, list, type Wire } from './protocol-request'
 import { RequestDiagnostics, diagnosticHeaders, diagnosticEndpoint } from './request-diagnostics'
 import type { RequestFailureLog } from '../../shared/request-failure'
@@ -33,7 +34,8 @@ export async function testAccountModel(
   input: AccountModelTest,
   credential: Credential,
   request: typeof fetch,
-  onComplete?: (telemetry: ModelTestTelemetry, diagnostic: RequestFailureLog) => void
+  onComplete?: (telemetry: ModelTestTelemetry, diagnostic: RequestFailureLog) => void,
+  codexVersion = CODEX_FALLBACK_VERSION
 ): Promise<AccountModelTestResult> {
   const started = performance.now()
   const telemetry: ModelTestTelemetry = {
@@ -91,7 +93,8 @@ export async function testAccountModel(
     if (input.protocol === 'messages') headers.set('x-api-key', credential.accessToken)
   }
   if (input.provider === 'codex') {
-    for (const [key, value] of Object.entries(codexHeaders(credential))) headers.set(key, value)
+    for (const [key, value] of Object.entries(codexHeaders(credential, codexVersion)))
+      headers.set(key, value)
     headers.set('session_id', randomUUID())
   }
   if (input.provider === 'kimi')

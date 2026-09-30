@@ -14,6 +14,7 @@ import {
 import { readLocalCodexAuth } from '../src/main/services/codex-local'
 import { GatewayStore } from '../src/main/services/gateway-store'
 import { Gateway } from '../src/main/services/gateway'
+import { CODEX_VERSION_URL } from '../src/main/services/codex-version'
 
 const jwt = (exp = Math.floor(Date.now() / 1000) + 3600) =>
   'test.' +
@@ -174,12 +175,27 @@ test('Codex 网关三协议转发、非流式原始响应与流式透传', async
   }
   const events = `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: completed })}\n\n`
   let calls = 0
+  let versionCalls = 0
+  const metadata: typeof fetch = async (url, init) => {
+    if (String(url) === CODEX_VERSION_URL) {
+      versionCalls++
+      return Response.json({ name: '@openai/codex', version: '0.160.0' })
+    }
+    const headers = new Headers(init?.headers)
+    assert.equal(headers.get('version'), '0.160.0')
+    assert.equal(headers.get('user-agent'), 'codex_cli_rs/0.160.0')
+    if (String(url).includes('/models?'))
+      assert.equal(new URL(String(url)).searchParams.get('client_version'), '0.160.0')
+    return models(url, init)
+  }
   const request: typeof fetch = async (url, init) => {
     assert.equal(String(url), 'https://chatgpt.com/backend-api/codex/responses')
     const headers = new Headers(init?.headers)
     assert.equal(headers.get('chatgpt-account-id'), 'account-test')
     assert.ok(headers.get('authorization')?.startsWith('Bearer test.'))
     assert.equal(headers.get('accept'), 'text/event-stream')
+    assert.equal(headers.get('version'), '0.160.0')
+    assert.equal(headers.get('user-agent'), 'codex_cli_rs/0.160.0')
     const payload = JSON.parse(Buffer.from(init?.body as Uint8Array).toString())
     assert.equal(payload.model, 'gpt-manual')
     assert.equal(payload.stream, true)
@@ -188,9 +204,9 @@ test('Codex 网关三协议转发、非流式原始响应与流式透传', async
     calls++
     return new Response(new TextEncoder().encode(events))
   }
-  const gateway = new Gateway(f.store, request, models, models)
+  const gateway = new Gateway(f.store, request, metadata, models)
   try {
-    await new CodexAuth(f.store, models, f.dir).importLocal()
+    await new CodexAuth(f.store, metadata, f.dir).importLocal()
     await gateway.saveAccount({ ...gateway.snapshot().accounts[0], manualModels: ['gpt-manual'] })
     const reserved = createServer()
     await new Promise<void>((resolve) => reserved.listen(0, '127.0.0.1', resolve))
@@ -223,6 +239,16 @@ test('Codex 网关三协议转发、非流式原始响应与流式透传', async
     })
     assert.equal(await stream.text(), events)
     assert.equal(calls, 4)
+    const probe = await gateway.testAccountModel({
+      id: f.store.get().accounts[0].id,
+      provider: 'codex',
+      region: 'global',
+      model: 'gpt-manual',
+      protocol: 'responses'
+    })
+    assert.equal(probe.text, '你好')
+    assert.equal(calls, 5)
+    assert.equal(versionCalls, 1)
   } finally {
     await gateway.shutdown()
     gateway.history.close()
