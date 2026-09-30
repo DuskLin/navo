@@ -236,6 +236,7 @@ void app
     })
     await dashboard.load()
     await service.pricing.load()
+    void service.codex.clientVersion.get()
     gateway = service
     const handle = (
       channel: string,

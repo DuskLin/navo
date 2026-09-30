@@ -440,6 +440,9 @@ export class GatewayStore {
   get priceCachePath(): string {
     return `${this.file}.model-prices.json`
   }
+  get codexVersionCachePath(): string {
+    return `${this.file}.codex-version.json`
+  }
   get historyPath(): string {
     return `${this.file}.requests.sqlite`
   }

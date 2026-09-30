@@ -6,9 +6,9 @@ import { randomUUID } from 'node:crypto'
 import type { AccountCapabilities } from '../../shared/contracts'
 import { GatewayStore, capabilityFields, object, string, type Credential } from './gateway-store'
 import { ProtocolError, type Wire } from './protocol-request'
+import { CodexClientVersion } from './codex-version'
 
 const BASE = 'https://chatgpt.com/backend-api/codex'
-const VERSION = '0.144.0'
 function claim(token: string): Record<string, unknown> {
   try {
     return object(JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()))
@@ -54,13 +54,13 @@ export function parseCodexAuth(raw: string): Credential {
       : {})
   }
 }
-export function codexHeaders(credential: Credential): Record<string, string> {
+export function codexHeaders(credential: Credential, version: string): Record<string, string> {
   return {
     authorization: 'Bearer ' + credential.accessToken,
     'chatgpt-account-id': credential.accountId!,
     originator: 'codex_cli_rs',
-    version: VERSION,
-    'user-agent': 'codex_cli_rs/' + VERSION,
+    version,
+    'user-agent': 'codex_cli_rs/' + version,
     accept: 'text/event-stream'
   }
 }
@@ -97,13 +97,19 @@ export function sameCodexAccount(a: Credential, b: Credential): boolean {
   )
 }
 export class CodexAuth {
+  readonly clientVersion: CodexClientVersion
   private importing?: Promise<string>
   private refreshing = new Map<string, Promise<Credential>>()
   constructor(
     private store: GatewayStore,
     private request: typeof fetch = fetch,
     private home = process.env.CODEX_HOME || join(homedir(), '.codex')
-  ) {}
+  ) {
+    this.clientVersion = new CodexClientVersion(store.codexVersionCachePath, request)
+  }
+  async headers(credential: Credential): Promise<Record<string, string>> {
+    return codexHeaders(credential, await this.clientVersion.get())
+  }
   importLocal(): Promise<string> {
     this.importing ??= this.importOnce().finally(() => {
       this.importing = undefined
@@ -162,8 +168,10 @@ export class CodexAuth {
     return importedId
   }
   async models(credential: Credential, signal?: AbortSignal): Promise<AccountCapabilities> {
-    const response = await this.request(BASE + '/models?client_version=' + VERSION, {
-      headers: { ...codexHeaders(credential), accept: 'application/json' },
+    const headers = await this.headers(credential)
+    signal?.throwIfAborted()
+    const response = await this.request(BASE + '/models?client_version=' + headers.version, {
+      headers: { ...headers, accept: 'application/json' },
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
         : AbortSignal.timeout(20000),
@@ -200,8 +208,10 @@ export class CodexAuth {
   private async quota(credential: Credential, signal?: AbortSignal) {
     const unavailable = (warning: string) => ({ quota: null, warning })
     try {
+      const headers = await this.headers(credential)
+      signal?.throwIfAborted()
       const response = await this.request('https://chatgpt.com/backend-api/wham/usage', {
-        headers: { ...codexHeaders(credential), accept: 'application/json' },
+        headers: { ...headers, accept: 'application/json' },
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
           : AbortSignal.timeout(15000),

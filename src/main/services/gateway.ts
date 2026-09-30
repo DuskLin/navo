@@ -6,7 +6,7 @@ import { inspectUpstreamBody } from './upstream-body'
 import { testAccountModel } from './account-model-test'
 import { MODEL_PROTOCOLS } from '../../shared/model-protocols'
 import { accountSupportsModel, mappedModel } from '../../shared/model-mapping'
-import { CodexAuth, codexHeaders, codexRequest } from './codex-auth'
+import { CodexAuth, codexRequest } from './codex-auth'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable, Transform } from 'node:stream'
@@ -525,7 +525,8 @@ export class Gateway {
             ...telemetry
           },
           diagnostic
-        )
+        ),
+      provider === 'codex' ? await this.codex.clientVersion.get() : undefined
     )
   }
   async refreshAccount(value: unknown, signal?: AbortSignal): Promise<GatewaySnapshot> {
@@ -1013,8 +1014,9 @@ export class Gateway {
             }
           }
           if (account.provider === 'codex') {
-            for (const [name, value] of Object.entries(codexHeaders(credential)))
+            for (const [name, value] of Object.entries(await this.codex.headers(credential)))
               headers.set(name, value)
+            controller.signal.throwIfAborted()
             headers.delete('anthropic-version')
             headers.delete('anthropic-beta')
             headers.set('session_id', goSession)

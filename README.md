@@ -307,6 +307,7 @@ MiniMax M 系列在转发 Messages / Chat Completions 前，参考 sub2api 将 S
 - 默认目录在 macOS 优先读取 `Codex Auth` 钥匙串，再回退到 `~/.codex/auth.json`；设置 `CODEX_HOME` 时使用该目录，自定义目录不读取默认钥匙串。Windows / Linux 当前支持文件认证。
 - 同一用户、同一工作区重复导入会更新认证，保留账号名称、开关及并发设置。凭据仅在主进程读取，并通过系统安全存储加密保存，不会复制到剪贴板或返回界面。
 - 上游使用 Codex Responses 接口；网关支持 Responses、Chat Completions 和 Messages 的流式及非流式调用。上游固定 `store=false`，需要传入完整对话历史，不支持 `previous_response_id` 或后台任务。
+- Codex 客户端版本标识自动读取官方 npm 包 `@openai/codex` 的最新稳定版，应用启动时预加载，缓存超过 6 小时后在下次使用时刷新；转发、模型同步和模型测试共用该版本。获取超时（3 秒）或失败时使用缓存，再回退到内置版本，5 分钟后可重试；无需升级本机 Codex。
 - 认证临近过期时先采纳本机同账号的新令牌，再尝试刷新网关保存的认证。不会修改原 Codex 登录文件或钥匙串；若本机与网关轮换了同一刷新令牌而导致认证失效，请重新登录并导入。
 
 认证存储方式可参阅 [OpenAI Codex 认证文档](https://developers.openai.com/codex/auth)。读取方式参考 cc-switch，转发和刷新流程参考 sub2api。
