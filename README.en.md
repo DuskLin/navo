@@ -330,6 +330,16 @@ Linux requires FUSE 2, executable permission on the AppImage and an unlocked Sec
 - [Technical reference](docs/reference.zh-CN.md): synchronization, scheduling scores, metric definitions, configuration migration, and storage details (Chinese).
 - [Screenshot sources](docs/images/README.md): image provenance and update instructions.
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=DuskLin%2Fnavo&type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date" />
+    <img alt="Navo GitHub star growth over time" src="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date" />
+  </picture>
+</a>
+
 ## License
 
 [MIT](LICENSE)
