@@ -582,16 +582,6 @@ PR 会构建全部平台但不发布；版本发布必须等所有平台检查�
 | [发布说明](release-notes/README.md)           | 中文版本说明的生成与维护         |
 | [截图来源](docs/images/README.md)             | 配图说明与更新方式               |
 
-## Star 趋势
-
-<a href="https://www.star-history.com/?repos=DuskLin%2Fnavo&type=date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date" />
-    <img alt="Navo 的 GitHub Star 增长趋势" src="https://api.star-history.com/svg?repos=DuskLin/navo&type=Date" />
-  </picture>
-</a>
-
 ## 许可证
 
 [MIT](LICENSE)
