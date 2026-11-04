@@ -1412,8 +1412,8 @@ test('failed gateway requests persist sanitized HTTP, retry and streaming diagno
         temperature: 0.5
       })
       const raw = await response.text()
-      assert.equal(response.status, next === 'http' ? 400 : next === 'retry' ? 503 : 200)
-      if (next !== 'retry') assert.match(raw, /private-prompt/)
+      assert.equal(response.status, next === 'http' ? 400 : next === 'retry' ? 429 : 200)
+      assert.match(raw, /private-prompt/)
       await eventually(() => f.gateway.history.page().total > previous)
       const latest = f.gateway.history.page().records[0]
       const log = f.gateway.history.failureReport(latest.id).diagnostic!
@@ -1656,6 +1656,38 @@ test('额度缺失、陈旧和窗口重置时不伪造满额，也不永久锁�
   assert.equal(scheduler.state('a').active, 2)
   assert.equal(scheduler.state('b').active, 2)
   leases.forEach((l) => l.release())
+})
+
+test('Kimi 总额度耗尽时切换账号，过期或重置后允许重新尝试', () => {
+  let now = Date.now()
+  const scheduler = new Scheduler(() => now)
+  const a = account('a'),
+    b = account('b')
+  setQuota(a, 90, 90, now)
+  setQuota(b, 40, 40, now)
+  const first = scheduler.acquire([a, b], group, 'm', 'session', new Set())!
+  assert.equal(first.account.id, a.id)
+  first.release()
+  a.capabilities!.quota!.totalUnlimited = false
+  a.capabilities!.quota!.total = {
+    limit: 100,
+    used: 100,
+    remaining: 0,
+    resetAt: new Date(now + 3600000).toISOString()
+  }
+  const next = scheduler.acquire([a, b], group, 'm', 'session', new Set())!
+  assert.equal(next.account.id, b.id)
+  next.release()
+  assert.equal(scheduler.acquire([a], group, 'm', '', new Set()), undefined)
+  now += 120001
+  const stale = scheduler.acquire([a], group, 'm', '', new Set())!
+  assert.ok(stale)
+  stale.release()
+  a.capabilities!.checkedAt = now
+  a.capabilities!.quota!.total!.resetAt = new Date(now - 1).toISOString()
+  const reset = scheduler.acquire([a], group, 'm', '', new Set())!
+  assert.ok(reset)
+  reset.release()
 })
 
 test('后台额度刷新合并调用，保留粘性、手动并发、冷却及认证失败；失败不伪造新鲜额度', async () => {
@@ -2117,6 +2149,102 @@ test('429 冷却并切换；400 原样返回且不重试；503 耗尽有界退�
   }
 })
 
+test('429 重试耗尽后保留上游额度错误、响应头和请求记录', async () => {
+  let calls = 0
+  const raw = JSON.stringify({
+    error: {
+      type: 'exceeded_current_quota_error',
+      code: 'insufficient_quota',
+      message: 'Your credit balance is insufficient.'
+    }
+  })
+  const f = await gatewayFixture((_req, res) => {
+    calls++
+    res.writeHead(429, {
+      'content-type': 'application/json',
+      'retry-after': '3600',
+      'x-request-id': 'quota-error'
+    })
+    res.end(raw)
+  })
+  try {
+    for (const route of ['/v1/chat/completions', '/v1/responses', '/v1/messages']) {
+      for (const a of f.store.get().accounts) f.gateway.scheduler.reset(a.id)
+      const response = await f.post({ stream: true }, {}, route)
+      assert.equal(response.status, 429)
+      assert.equal(await response.text(), raw)
+      assert.equal(response.headers.get('retry-after'), '3600')
+      assert.equal(response.headers.get('x-request-id'), 'quota-error')
+      const record = f.gateway.history.page().records[0]
+      assert.equal(record.status, 429)
+      assert.equal(record.attempts, 2)
+      assert.equal(record.interruption, null)
+      assert.ok(f.gateway.snapshot().accounts.every((a) => a.runtime.active === 0))
+    }
+    assert.equal(calls, 6)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('跨协议 429 保留额度错误类型和错误码', async () => {
+  const f = await gatewayFixture(
+    (_req, res) => {
+      res.writeHead(429, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          error: {
+            type: 'rate_limit_error',
+            code: 'insufficient_quota',
+            message: 'Quota exhausted'
+          }
+        })
+      )
+    },
+    ['a']
+  )
+  try {
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = { 'kimi-for-coding': ['chat-completions'] }
+    })
+    const response = await f.post({}, {}, '/v1/messages')
+    assert.equal(response.status, 429)
+    assert.deepEqual(await response.json(), {
+      type: 'error',
+      error: {
+        type: 'rate_limit_error',
+        code: 'insufficient_quota',
+        message: 'Quota exhausted'
+      }
+    })
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('429 错误体超限时返回完整 JSON，后续其他故障不复用旧 429', async () => {
+  let mode = 'large'
+  const f = await gatewayFixture((req, res) => {
+    const status = mode === 'mixed' && req.headers.authorization === 'Bearer secret-b' ? 503 : 429
+    res.writeHead(status, { 'content-type': 'application/json' })
+    res.end(mode === 'large' ? '{' + 'x'.repeat(300000) : '{}')
+  })
+  try {
+    const response = await f.post()
+    assert.equal(response.status, 429)
+    assert.equal((await response.json()).error.type, 'rate_limit_error')
+    assert.equal(response.headers.get('retry-after'), '1')
+    mode = 'mixed'
+    for (const a of f.store.get().accounts) f.gateway.scheduler.reset(a.id)
+    const mixed = await f.post()
+    assert.equal(mixed.status, 503)
+    await mixed.text()
+    assert.equal(f.gateway.history.page().records[0].attempts, 2)
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('首 token 从请求开始计时并包含重试，跳过响应头和初始化帧，总耗时单独记录', async () => {
   let calls = 0
   const preamble = ': heartbeat\n\nevent: response.created\ndata: {"type":"response.created"}\n\n'
@@ -2342,7 +2470,75 @@ test('并发请求不超卖，配置变更不破坏在途请求，网关可重�
   }
 })
 
-test('请求体大小、方法校验和上游重定向限制', async () => {
+test('超过 8 MiB 的请求按原始字节转发，大小是否可接受由上游决定', async () => {
+  const bodies: Buffer[] = []
+  let status = 200
+  const error = JSON.stringify({ error: { type: 'request_too_large', message: 'upstream limit' } })
+  const f = await gatewayFixture((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => {
+      bodies.push(Buffer.concat(chunks))
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(status === 200 ? '{"ok":true}' : error)
+    })
+  })
+  try {
+    const body = Buffer.from(
+      JSON.stringify({
+        model: 'kimi-for-coding',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '检查自动化截图' },
+              {
+                type: 'image_url',
+                image_url: { url: 'data:image/png;base64,' + 'a'.repeat(9 * 1024 * 1024) }
+              }
+            ]
+          }
+        ]
+      })
+    )
+    for (const chunked of [false, true]) {
+      const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = httpRequest(
+          f.url + '/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              ...(chunked ? {} : { 'content-length': body.length })
+            }
+          },
+          (res) => {
+            let raw = ''
+            res.on('data', (chunk) => (raw += chunk))
+            res.on('end', () => resolve({ status: res.statusCode!, body: raw }))
+            res.on('error', reject)
+          }
+        )
+        req.on('error', reject)
+        req.write(body.subarray(0, 1024))
+        req.end(body.subarray(1024))
+      })
+      assert.equal(result.status, 200)
+      assert.deepEqual(bodies.at(-1), body)
+    }
+    status = 413
+    const response = await fetch(f.url + '/v1/chat/completions', { method: 'POST', body })
+    assert.equal(response.status, 413)
+    assert.equal(await response.text(), error)
+    assert.deepEqual(bodies.at(-1), body)
+    assert.equal(bodies.length, 3)
+    assert.equal(f.gateway.history.page().records[0].attempts, 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('方法校验和上游重定向限制', async () => {
   let redirected = 0,
     calls = 0
   const target = await listen((_req, res) => {
@@ -2355,11 +2551,6 @@ test('请求体大小、方法校验和上游重定向限制', async () => {
     res.end()
   })
   try {
-    assert.equal(
-      (await f.post({ messages: [{ role: 'user', content: 'x'.repeat(8 * 1024 * 1024) }] })).status,
-      413
-    )
-    assert.equal(calls, 0)
     assert.equal(
       (
         await fetch(`${f.url}/v1/chat/completions`, {

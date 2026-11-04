@@ -96,3 +96,16 @@ export function hasCommandCodeExtraCredits(
     (quota?.extraCredits ?? 0) > 0
   )
 }
+
+// 调度和界面共用同一判断；Kimi 总额度独立于周期额度，任一耗尽均不可调用。
+export function isQuotaExhausted(
+  provider: string | undefined,
+  quota: AccountQuota | null | undefined,
+  checkedAt: number,
+  now: number
+): boolean {
+  if (hasCommandCodeExtraCredits(provider, quota, checkedAt, now)) return false
+  const windows = [quota?.fiveHour, quota?.weekly, quota?.monthly]
+  if ((provider ?? 'kimi') === 'kimi' && !quota?.totalUnlimited) windows.push(quota?.total)
+  return windows.some((window) => remainingRatio(window, checkedAt, now) === 0)
+}

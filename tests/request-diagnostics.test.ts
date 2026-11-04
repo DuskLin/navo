@@ -91,12 +91,14 @@ test('diagnostics preserve model IDs and complete error objects while redacting 
 
 test('rejected body capture preserves non-JSON errors and bounds oversized bodies', async () => {
   const d = new RequestDiagnostics()
-  await d.rejected(new Response('<html>private-error</html>', { status: 502 }), 1)
-  await d.rejected(new Response('x'.repeat(300000), { status: 503 }), 2)
-  await d.rejected(
+  const complete = await d.rejected(new Response('<html>private-error</html>', { status: 502 }), 1)
+  assert.equal(complete?.toString(), '<html>private-error</html>')
+  assert.equal(await d.rejected(new Response('x'.repeat(300000), { status: 503 }), 2), undefined)
+  const json = await d.rejected(
     Response.json({ error: { code: 'overloaded', message: 'Try again' } }, { status: 429 }),
     3
   )
+  assert.equal(JSON.parse(json!.toString()).error.code, 'overloaded')
   const text = JSON.stringify(d.log)
   assert.ok(text.includes('private-error'))
   assert.match(text, /truncated/)
@@ -107,7 +109,7 @@ test('rejected body capture preserves non-JSON errors and bounds oversized bodie
     }
   })
   const start = Date.now()
-  await d.rejected(new Response(stream, { status: 500 }), 4)
+  assert.equal(await d.rejected(new Response(stream, { status: 500 }), 4), undefined)
   assert.ok(Date.now() - start < 3000)
 })
 

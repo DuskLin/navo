@@ -76,7 +76,7 @@ import {
 import { useQuotaCardDrag } from './useQuotaCardDrag'
 import { createRequestCostCalculator } from '../../shared/request-cost'
 import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
-import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
+import { isQuotaExhausted } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 import { validateModelMappings } from '../../shared/model-mapping'
 import { ModelMappingEditor } from './ModelMappingEditor'
@@ -499,19 +499,7 @@ function accountStatus(a: AccountView): { text: string; className: string } {
       className: 'warning'
     }
   if (a.runtime.active >= a.maxConcurrency) return { text: '满载', className: 'warning' }
-  if (
-    [
-      a.capabilities.quota?.fiveHour,
-      a.capabilities.quota?.weekly,
-      a.capabilities.quota?.monthly
-    ].some((window) => remainingRatio(window, a.capabilities!.checkedAt, Date.now()) === 0) &&
-    !hasCommandCodeExtraCredits(
-      a.provider,
-      a.capabilities.quota,
-      a.capabilities.checkedAt,
-      Date.now()
-    )
-  )
+  if (isQuotaExhausted(a.provider, a.capabilities.quota, a.capabilities.checkedAt, Date.now()))
     return { text: '额度耗尽', className: 'warning' }
   return { text: a.runtime.active ? '处理中' : '可调度', className: 'healthy' }
 }
