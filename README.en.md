@@ -254,7 +254,7 @@ Sessions stay on an available account to preserve cache benefits. The scheduler 
 
 ## Limits and data storage
 
-- The gateway listens only on `127.0.0.1` for local clients. WebSocket is unsupported. The request body limit is 8 MB, the default total timeout is 300 seconds, and requests return 503 when no account is available.
+- The gateway listens only on `127.0.0.1` for local clients. WebSocket is unsupported. There is no fixed local request body size limit; the upstream decides whether to accept the request. The default total timeout is 300 seconds. Requests return 503 when no account is available, except that a final upstream 429 response retains its status and error details.
 - Cross-protocol requests require full message history. Upstream-private references such as `previous_response_id` and `file_id`, upstream-hosted search, background tasks, and `n > 1` are unsupported during conversion and produce explicit errors.
 - Cost estimates use current model prices and treat missing prices and usage as zero. Updating prices changes historical estimates; currencies remain separate. Cost estimates and quota valuations are not actual bills. Interrupted usage includes only usage reported before interruption.
 - Configuration is encrypted using system secure storage in `gateway.json` under Electron's user data directory. Linux refuses to save credentials without an available keyring. Encrypted configuration depends on the original system keychain and is not portable between machines.

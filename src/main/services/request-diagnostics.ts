@@ -168,8 +168,8 @@ export class RequestDiagnostics {
       this.error({ message: raw || '[empty error body]' }, attempt, status)
     }
   }
-  /** Consume only rejected responses, with bounded bytes and time; never delay retries indefinitely. */
-  async rejected(response: Response, attempt: number): Promise<void> {
+  /** 有界读取拒绝响应；完整正文可用于重试耗尽后返回给客户端。 */
+  async rejected(response: Response, attempt: number): Promise<Buffer | undefined> {
     const reader = response.body?.getReader()
     if (!reader) {
       this.error({}, attempt, response.status)
@@ -194,7 +194,9 @@ export class RequestDiagnostics {
           break
         }
       }
-      this.errorBody(Buffer.concat(chunks).toString('utf8'), attempt, response.status, truncated)
+      const body = Buffer.concat(chunks)
+      this.errorBody(body.toString('utf8'), attempt, response.status, truncated)
+      if (!truncated) return body
     } catch {
       this.error({ message: '[error body read failed]' }, attempt, response.status)
     } finally {

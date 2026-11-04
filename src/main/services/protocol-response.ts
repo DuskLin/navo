@@ -881,7 +881,8 @@ export async function* convertResponse(
                 type: 'error',
                 error: {
                   type: str(error.type) || 'api_error',
-                  message: str(error.message ?? root.message) || '上游请求失败'
+                  message: str(error.message ?? root.message) || '上游请求失败',
+                  ...(error.code != null ? { code: error.code } : {})
                 }
               }
             : {

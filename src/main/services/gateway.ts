@@ -107,17 +107,33 @@ function jsonError(res: ServerResponse, status: number, message: string): void {
   )
 }
 async function bodyOf(req: IncomingMessage): Promise<Buffer> {
-  const limit = 8 * 1024 * 1024
-  if (Number(req.headers['content-length']) > limit) throw new HttpError(413, '请求体超过 8 MB')
   const chunks: Buffer[] = []
-  let bytes = 0
-  // 不销毁读流，使超限时仍能返回结构化错误。
+  // 截图和工具历史可能很大，由上游判断大小；保留原始字节用于同协议透传。
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
-    bytes += chunk.length
-    if (bytes > limit) throw new HttpError(413, '请求体超过 8 MB')
-    chunks.push(Buffer.from(chunk))
+    chunks.push(chunk)
   }
   return Buffer.concat(chunks)
+}
+
+function responseHeaders(upstream: Response): Record<string, string> {
+  const outgoing: Record<string, string> = {
+    'cache-control': 'no-store',
+    'x-accel-buffering': 'no'
+  }
+  for (const name of [
+    'content-type',
+    'request-id',
+    'x-request-id',
+    'x-msh-request-id',
+    'requestid',
+    'x-kimi-request-id',
+    'x-trace-id',
+    'retry-after'
+  ]) {
+    const value = upstream.headers.get(name)
+    if (value) outgoing[name] = value
+  }
+  return outgoing
 }
 export class Gateway {
   readonly pricing: ModelPriceCatalog
@@ -858,6 +874,7 @@ export class Gateway {
           harnessPath?.[1]
         )
       const excluded = new Set<string>()
+      let lastRateLimit: { body: Buffer; headers: Record<string, string> } | undefined
       while (attempts < settings.maxAttempts && !controller.signal.aborted) {
         // 每次尝试读取最新配置，禁用、删除和分组变更立即影响后续调度。
         const latest = this.store.get()
@@ -893,6 +910,8 @@ export class Gateway {
         accountId = account.id
         provider = account.provider ?? 'kimi'
         attempts++
+        // 后续尝试若是其他故障，不返回先前账号的 429。
+        lastRateLimit = undefined
         upstreamRoute = null
         upstreamModel = undefined
         if (flowId) this.liveFlows.update(flowId, { state: 'waiting' })
@@ -1069,7 +1088,37 @@ export class Gateway {
               settings.cooldownSeconds,
               upstream.headers.get('retry-after')
             )
-            await diagnostics.rejected(upstream, attempts)
+            const rejected = await diagnostics.rejected(upstream, attempts)
+            if (upstream.status === 429) {
+              let errorBody = rejected?.length
+                ? rejected
+                : Buffer.from(
+                    JSON.stringify({
+                      type: 'error',
+                      error: {
+                        type: 'rate_limit_error',
+                        message: '上游返回 HTTP 429：额度不足或请求限流，请检查账号额度后重试'
+                      }
+                    })
+                  )
+              const headers = responseHeaders(upstream)
+              headers['retry-after'] ??= String(settings.cooldownSeconds)
+              if (!rejected?.length || converted) headers['content-type'] = 'application/json'
+              if (converted) {
+                const chunks: Buffer[] = []
+                for await (const chunk of convertResponse(Readable.from([errorBody]), {
+                  source: routeProtocol(targetRoute),
+                  target: routeProtocol(route),
+                  context: converted.context,
+                  inputStream: false,
+                  outputStream: false,
+                  ok: false
+                }))
+                  chunks.push(chunk)
+                errorBody = Buffer.concat(chunks)
+              }
+              lastRateLimit = { body: errorBody, headers }
+            }
             continue
           }
           if (upstream.status >= 300 && upstream.status < 400) {
@@ -1083,23 +1132,7 @@ export class Gateway {
             continue
           }
           finalStatus = upstream.status
-          const outgoing: Record<string, string> = {
-            'cache-control': 'no-store',
-            'x-accel-buffering': 'no'
-          }
-          for (const name of [
-            'content-type',
-            'request-id',
-            'x-request-id',
-            'x-msh-request-id',
-            'requestid',
-            'x-kimi-request-id',
-            'x-trace-id',
-            'retry-after'
-          ]) {
-            const value = upstream.headers.get(name)
-            if (value) outgoing[name] = value
-          }
+          const outgoing = responseHeaders(upstream)
           const inspected = upstream.body
             ? await inspectUpstreamBody(upstream.body, upstream.headers.get('content-type'))
             : undefined
@@ -1280,6 +1313,12 @@ export class Gateway {
       }
       if (controller.signal.aborted)
         throw new HttpError(timedOut ? 504 : 503, timedOut ? '网关请求总超时' : '网关已停止')
+      if (lastRateLimit) {
+        finalStatus = 429
+        res.writeHead(finalStatus, lastRateLimit.headers)
+        res.end(lastRateLimit.body)
+        return
+      }
       res.setHeader('retry-after', String(settings.cooldownSeconds))
       throw new HttpError(503, '无可用账号：请检查凭据、模型、并发上限、额度或冷却状态')
     } catch (error) {

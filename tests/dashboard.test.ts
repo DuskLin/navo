@@ -267,7 +267,7 @@ test('dashboard source projects only safe data and preserves user account names'
           resetAt: new Date(now + 3600000).toISOString()
         },
         weekly: null,
-        total: null,
+        total: null as import('../src/shared/contracts').QuotaWindow | null,
         totalUnlimited: false
       }
     }
@@ -310,4 +310,12 @@ test('dashboard source projects only safe data and preserves user account names'
     assert.equal(mapped.accounts[0].provider, label)
     assert.ok(!JSON.stringify(mapped).includes('SENTINEL'))
   }
+  account.provider = 'kimi'
+  account.capabilities.quota.total = { limit: 100, used: 100, remaining: 0, resetAt: null }
+  assert.equal((await dashboardSource(gateway, usage)()).accounts[0].status, 'exhausted')
+  account.capabilities.quota.total.resetAt = new Date(now - 1).toISOString()
+  assert.equal((await dashboardSource(gateway, usage)()).accounts[0].status, 'available')
+  account.capabilities.quota.total.resetAt = null
+  account.capabilities.checkedAt = now - 120001
+  assert.equal((await dashboardSource(gateway, usage)()).accounts[0].status, 'stale')
 })

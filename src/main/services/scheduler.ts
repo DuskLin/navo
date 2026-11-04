@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { AccountRuntime } from '../../shared/contracts'
 import { accountSupportsModel } from '../../shared/model-mapping'
-import { hasCommandCodeExtraCredits, remainingRatio } from '../../shared/kimi-quota'
+import { isQuotaExhausted, remainingRatio } from '../../shared/kimi-quota'
 import type { StoredAccount, StoredGroup } from './gateway-store'
 
 export class Scheduler {
@@ -81,14 +81,8 @@ export class Scheduler {
         account.capabilities.checkedAt,
         now
       )
-      const monthly = remainingRatio(
-        account.capabilities.quota?.monthly,
-        account.capabilities.checkedAt,
-        now
-      )
       if (
-        (fiveHour === 0 || weekly === 0 || monthly === 0) &&
-        !hasCommandCodeExtraCredits(
+        isQuotaExhausted(
           account.provider,
           account.capabilities.quota,
           account.capabilities.checkedAt,
